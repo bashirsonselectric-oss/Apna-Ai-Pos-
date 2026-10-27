@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Apna AI POS - Cloud Retail & Udhar Khatta Engine",
+  "short_name": "Apna POS",
+  "description": "Multi-tenant cloud POS and intelligent inventory system by Godigly with offline billing capabilities and Omni-Input AI automation.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -1,0 +1,692 @@
+import React, { useState } from 'react';
+import { usePos } from '../../context/PosContext';
+import { PersonKhattaProfile, PersonKhattaEntry, PaymentMethod } from '../../types';
+import {
+  BookUser,
+  Plus,
+  Send,
+  Trash2,
+  Calendar,
+  Search,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Phone,
+  UserCheck,
+  X,
+  FileText,
+  DollarSign,
+  Scale,
+  Receipt,
+  MessageCircle,
+} from 'lucide-react';
+
+export const PersonKhatta: React.FC = () => {
+  const {
+    personKhattaProfiles,
+    personKhattaEntries,
+    addPersonProfile,
+    deletePersonProfile,
+    addPersonEntry,
+    deletePersonEntry,
+    storeProfile,
+  } = usePos();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPersonId, setSelectedPersonId] = useState<string>(
+    personKhattaProfiles[0]?.id || ''
+  );
+
+  // Modals
+  const [isAddPersonOpen, setIsAddPersonOpen] = useState(false);
+  const [isAddEntryOpen, setIsAddEntryOpen] = useState(false);
+
+  // Add person form state
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('+92 3');
+  const [newRole, setNewRole] = useState('Site Electrician Contractor');
+  const [newCnic, setNewCnic] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+
+  // Add entry form state
+  const [entryType, setEntryType] = useState<'advance_given' | 'spending_done'>('advance_given');
+  const [entryAmount, setEntryAmount] = useState<number>(0);
+  const [entryDescription, setEntryDescription] = useState('');
+  const [entryMethod, setEntryMethod] = useState<PaymentMethod>('cash');
+  const [receiptNote, setReceiptNote] = useState('');
+
+  // Current selected person
+  const selectedPerson =
+    personKhattaProfiles.find((p) => p.id === selectedPersonId) ||
+    personKhattaProfiles[0];
+
+  // Entries for the selected person
+  const personEntries = selectedPerson
+    ? personKhattaEntries.filter((e) => e.personId === selectedPerson.id)
+    : [];
+
+  // Filtered persons
+  const filteredProfiles = personKhattaProfiles.filter(
+    (p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.phone.includes(searchQuery) ||
+      p.roleRelation.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Overall totals
+  const totalAdvancesGivenAll = personKhattaProfiles.reduce(
+    (sum, p) => sum + p.totalAdvanceGiven,
+    0
+  );
+  const totalSpendingsDoneAll = personKhattaProfiles.reduce(
+    (sum, p) => sum + p.totalSpendingDone,
+    0
+  );
+  const netAdvancesRemainingAll = totalAdvancesGivenAll - totalSpendingsDoneAll;
+
+  // Handlers
+  const handleCreatePerson = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+
+    addPersonProfile({
+      name: newName.trim(),
+      phone: newPhone.trim(),
+      roleRelation: newRole.trim(),
+      cnic: newCnic.trim() || undefined,
+      notes: newNotes.trim() || undefined,
+    });
+
+    setIsAddPersonOpen(false);
+    setNewName('');
+    setNewPhone('+92 3');
+    setNewRole('Site Electrician Contractor');
+    setNewCnic('');
+    setNewNotes('');
+  };
+
+  const handleCreateEntry = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPerson || entryAmount <= 0 || !entryDescription.trim()) return;
+
+    addPersonEntry({
+      personId: selectedPerson.id,
+      type: entryType,
+      amount: entryAmount,
+      description: entryDescription.trim(),
+      paymentMethod: entryType === 'advance_given' ? entryMethod : undefined,
+      receiptNote: receiptNote.trim() || undefined,
+    });
+
+    setIsAddEntryOpen(false);
+    setEntryAmount(0);
+    setEntryDescription('');
+    setReceiptNote('');
+  };
+
+  // WhatsApp Statement Sharing
+  const sendPersonKhattaWhatsApp = (person: PersonKhattaProfile) => {
+    const entries = personKhattaEntries
+      .filter((e) => e.personId === person.id)
+      .slice(0, 8);
+
+    const transactionLines = entries.map((e) => {
+      const tag = e.type === 'advance_given' ? '💵 Advance Given' : '🧾 Spending/Work';
+      return `• ${e.date}: ${tag} ${storeProfile.currency} ${e.amount.toLocaleString()} - ${e.description}`;
+    });
+
+    const balanceText =
+      person.netBalance >= 0
+        ? `Advance remaining with you: ${storeProfile.currency} ${person.netBalance.toLocaleString()}`
+        : `Store owes you: ${storeProfile.currency} ${Math.abs(person.netBalance).toLocaleString()}`;
+
+    const text = `📒 *PERSON KHATTA FINANCIAL STATEMENT*
+🏪 *From:* ${storeProfile.name}
+👤 *Account:* ${person.name} (${person.roleRelation})
+📱 *Phone:* ${person.phone}
+━━━━━━━━━━━━━━━━━━━━━
+💵 *Total Advance Given:* ${storeProfile.currency} ${person.totalAdvanceGiven.toLocaleString()}
+🧾 *Total Spending / Work Done:* ${storeProfile.currency} ${person.totalSpendingDone.toLocaleString()}
+━━━━━━━━━━━━━━━━━━━━━
+⚖️ *CURRENT NET BALANCE:*
+*${balanceText}*
+
+📋 *Recent Statement Entries:*
+${transactionLines.length > 0 ? transactionLines.join('\n') : 'No recent transactions recorded.'}
+
+⚡ *Verified statement generated by Apna AI POS - Godigly Cloud*`;
+
+    const encoded = encodeURI(text);
+    const phoneClean = person.phone ? person.phone.replace(/[^0-9]/g, '') : '';
+    const url = phoneClean ? `https://wa.me/${phoneClean}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    window.open(url, '_blank');
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center space-x-2">
+            <div className="p-2 rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+              <BookUser className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                Person Khatta (Advance & Spending Ledger)
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Individual accounts for contractors, artisans, daily workers, partners, and friends with full advance calculation & WhatsApp statements.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setIsAddPersonOpen(true)}
+            className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-700/20"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Person</span>
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        <div className="bg-white dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>Total Advances Given</span>
+            <ArrowUpRight className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="text-xl font-black font-mono-numbers text-amber-600 dark:text-amber-400 mt-1">
+            {storeProfile.currency} {totalAdvancesGivenAll.toLocaleString()}
+          </div>
+          <span className="text-[10px] text-slate-400">Disbursed to contractors & partners</span>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>Total Spending / Work Done</span>
+            <Receipt className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="text-xl font-black font-mono-numbers text-emerald-600 dark:text-emerald-400 mt-1">
+            {storeProfile.currency} {totalSpendingsDoneAll.toLocaleString()}
+          </div>
+          <span className="text-[10px] text-slate-400">Material bought or tasks verified</span>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs">
+          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>Net Advance Held in Field</span>
+            <Scale className="w-4 h-4 text-teal-500" />
+          </div>
+          <div
+            className={`text-xl font-black font-mono-numbers mt-1 ${
+              netAdvancesRemainingAll >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-rose-600 dark:text-rose-400'
+            }`}
+          >
+            {storeProfile.currency} {netAdvancesRemainingAll.toLocaleString()}
+          </div>
+          <span className="text-[10px] text-slate-400">
+            {netAdvancesRemainingAll >= 0 ? 'Net advance remaining with people' : 'Store owes money'}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Split Layout: Left Roster & Right Ledger Details */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Side: Person Profiles List (4 cols) */}
+        <div className="lg:col-span-4 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs p-4 space-y-3">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search person or role..."
+              className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 rounded-xl text-slate-900 dark:text-white focus:outline-hidden"
+            />
+          </div>
+
+          <div className="space-y-2 max-h-[550px] overflow-y-auto custom-scrollbar pr-1">
+            {filteredProfiles.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">No person accounts found.</div>
+            ) : (
+              filteredProfiles.map((person) => {
+                const isSelected = selectedPerson?.id === person.id;
+                return (
+                  <div
+                    key={person.id}
+                    onClick={() => setSelectedPersonId(person.id)}
+                    className={`p-3.5 rounded-xl cursor-pointer border transition-all ${
+                      isSelected
+                        ? 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white">{person.name}</h4>
+                        <div className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold">{person.roleRelation}</div>
+                        <div className="text-[10px] font-mono text-slate-400 mt-0.5">{person.phone}</div>
+                      </div>
+
+                      <div className="text-right">
+                        <div
+                          className={`text-xs font-black font-mono-numbers ${
+                            person.netBalance >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-rose-600'
+                          }`}
+                        >
+                          {storeProfile.currency} {Math.abs(person.netBalance).toLocaleString()}
+                        </div>
+                        <span className="text-[9px] text-slate-400 uppercase font-bold">
+                          {person.netBalance >= 0 ? 'Advance Left' : 'Store Owes'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Right Side: Selected Person Ledger & Statement (8 cols) */}
+        <div className="lg:col-span-8 space-y-4">
+          {selectedPerson ? (
+            <>
+              {/* Person Summary Card */}
+              <div className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-wider">
+                      {selectedPerson.roleRelation}
+                    </span>
+                    <h2 className="text-lg font-black text-slate-900 dark:text-white">{selectedPerson.name}</h2>
+                    <div className="text-xs font-mono text-slate-500 flex items-center gap-2 mt-0.5">
+                      <span>{selectedPerson.phone}</span>
+                      {selectedPerson.cnic && <span>• CNIC: {selectedPerson.cnic}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => sendPersonKhattaWhatsApp(selectedPerson)}
+                      className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>WhatsApp Statement</span>
+                    </button>
+
+                    <button
+                      onClick={() => setIsAddEntryOpen(true)}
+                      className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Entry</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Calculation Metric Banner */}
+                <div className="grid grid-cols-3 gap-3 p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 text-center">
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-semibold">Total Advance Given</span>
+                    <div className="text-sm md:text-base font-black font-mono-numbers text-amber-600 dark:text-amber-400 mt-0.5">
+                      {storeProfile.currency} {selectedPerson.totalAdvanceGiven.toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-semibold">Total Spending / Work Done</span>
+                    <div className="text-sm md:text-base font-black font-mono-numbers text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {storeProfile.currency} {selectedPerson.totalSpendingDone.toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-slate-500 font-semibold">Net Balance Calculation</span>
+                    <div
+                      className={`text-sm md:text-base font-black font-mono-numbers mt-0.5 ${
+                        selectedPerson.netBalance >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-rose-600'
+                      }`}
+                    >
+                      {storeProfile.currency} {Math.abs(selectedPerson.netBalance).toLocaleString()}
+                    </div>
+                    <span className="text-[9px] text-slate-400 block font-bold">
+                      {selectedPerson.netBalance >= 0 ? 'Advance Remaining' : 'Store Owes'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Transactions List */}
+              <div className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xs overflow-hidden">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-white">
+                    Ledger Statement Entries ({personEntries.length})
+                  </span>
+                  <span className="text-[11px] text-slate-400">Advances & Spends</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-3.5">Date</th>
+                        <th className="p-3.5">Type</th>
+                        <th className="p-3.5">Description / Purpose</th>
+                        <th className="p-3.5">Method</th>
+                        <th className="p-3.5 text-right">Amount</th>
+                        <th className="p-3.5 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {personEntries.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-center py-10 text-slate-400">
+                            No ledger entries recorded for this person yet. Click "Add Entry" above.
+                          </td>
+                        </tr>
+                      ) : (
+                        personEntries.map((entry) => (
+                          <tr key={entry.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/40">
+                            <td className="p-3.5 font-mono text-[11px] text-slate-500">{entry.date}</td>
+
+                            <td className="p-3.5">
+                              {entry.type === 'advance_given' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                  <ArrowUpRight className="w-3 h-3" /> Advance Given
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                  <Receipt className="w-3 h-3" /> Spending / Work Done
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-3.5 font-bold text-slate-900 dark:text-white">
+                              <div>{entry.description}</div>
+                              {entry.receiptNote && (
+                                <div className="text-[10px] text-slate-400 font-normal">{entry.receiptNote}</div>
+                              )}
+                            </td>
+
+                            <td className="p-3.5 uppercase font-mono text-[10px] font-bold text-slate-500">
+                              {entry.paymentMethod || '—'}
+                            </td>
+
+                            <td className="p-3.5 text-right font-mono-numbers font-black text-sm">
+                              <span
+                                className={
+                                  entry.type === 'advance_given'
+                                    ? 'text-amber-600 dark:text-amber-400'
+                                    : 'text-emerald-600 dark:text-emerald-400'
+                                }
+                              >
+                                {entry.type === 'advance_given' ? '+' : '-'} {storeProfile.currency}{' '}
+                                {entry.amount.toLocaleString()}
+                              </span>
+                            </td>
+
+                            <td className="p-3.5 text-center">
+                              <button
+                                onClick={() => deletePersonEntry(entry.id)}
+                                className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center text-slate-400">
+              Select or create a person account on the left to view ledger entries.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Add Person Modal (with right-side scrollbar) */}
+      {isAddPersonOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-6">
+            <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider">
+                  Individual Ledger
+                </span>
+                <h3 className="text-base font-bold">Add Person Khatta Account</h3>
+              </div>
+              <button onClick={() => setIsAddPersonOpen(false)} className="p-1 text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePerson} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Rashid Electrician or Aslam Plumber"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white font-bold focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  WhatsApp Mobile Number *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  placeholder="+92 300 1234567"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white font-mono focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Role / Relation *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  placeholder="e.g. Site Contractor, Daily Labour, Partner, Driver, Friend"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  CNIC Number (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newCnic}
+                  onChange={(e) => setNewCnic(e.target.value)}
+                  placeholder="35202-xxxxxxx-x"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white font-mono focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Project Notes / Address
+                </label>
+                <textarea
+                  rows={2}
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  placeholder="e.g. Assigned to Model Town electrification site..."
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddPersonOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20"
+                >
+                  Create Person Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Ledger Entry Modal (Advance or Spending) with right-side scrollbar */}
+      {isAddEntryOpen && selectedPerson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-6">
+            <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider">
+                  Post Ledger Entry
+                </span>
+                <h3 className="text-base font-bold">Khatta Entry: {selectedPerson.name}</h3>
+              </div>
+              <button onClick={() => setIsAddEntryOpen(false)} className="p-1 text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateEntry} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              {/* Type Switcher */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setEntryType('advance_given')}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                    entryType === 'advance_given'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  💵 Advance Given (Pese Diye)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEntryType('spending_done')}
+                  className={`py-2 text-xs font-bold rounded-lg transition-all ${
+                    entryType === 'spending_done'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  🧾 Spending / Work Done
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Amount ({storeProfile.currency}) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={entryAmount || ''}
+                  onChange={(e) => setEntryAmount(Number(e.target.value))}
+                  placeholder="e.g. 10000"
+                  className={`w-full px-3 py-2 text-base font-black font-mono-numbers border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl focus:outline-hidden ${
+                    entryType === 'advance_given' ? 'text-amber-600' : 'text-emerald-600'
+                  }`}
+                />
+              </div>
+
+              {entryType === 'advance_given' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={entryMethod}
+                    onChange={(e) => setEntryMethod(e.target.value as PaymentMethod)}
+                    className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white focus:outline-hidden"
+                  >
+                    <option value="cash">Cash In Hand</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="jazzcash">JazzCash</option>
+                    <option value="easypaisa">EasyPaisa</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Description / Purpose *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={entryDescription}
+                  onChange={(e) => setEntryDescription(e.target.value)}
+                  placeholder={
+                    entryType === 'advance_given'
+                      ? 'e.g. Advance for site wiring & conduit tranches'
+                      : 'e.g. Purchased 20 PPRC valves & fittings from market'
+                  }
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white font-bold focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Receipt Note / Voucher Number (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={receiptNote}
+                  onChange={(e) => setReceiptNote(e.target.value)}
+                  placeholder="e.g. Voucher verified by supervisor"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl dark:text-white focus:outline-hidden"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddEntryOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-md shadow-teal-600/20"
+                >
+                  Record Entry
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

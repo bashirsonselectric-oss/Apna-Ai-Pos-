@@ -1,0 +1,6 @@
+{
+  "name": "Apna AI POS - Omni-Input Retail Billing & Inventory",
+  "description": "Multi-tenant cloud POS and intelligent inventory system by Godigly with Omni-Input AI automation (bill scanner, shelf recognition, messy CSV mapper, dynamic multi-vertical schemas).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

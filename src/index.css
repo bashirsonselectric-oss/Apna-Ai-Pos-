@@ -1,0 +1,327 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    color: #0f172a;
+    background-color: #f8fafc;
+  }
+
+  /* Base high-contrast form controls */
+  input, select, textarea {
+    color: #000000;
+  }
+
+  input::placeholder, select::placeholder, textarea::placeholder {
+    color: #666666;
+  }
+}
+
+/* Form Controls Color & Contrast Engine */
+/* Light / White background inputs: solid black text (#000000) & darker placeholder (#666666) */
+input, select, textarea {
+  color: #000000;
+}
+
+input::placeholder, select::placeholder, textarea::placeholder {
+  color: #666666;
+}
+
+/* Dark mode & dark background inputs: crisp white text (#ffffff) to ensure 100% readability */
+.dark input:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"]):not([type="checkbox"]):not([type="radio"]),
+.dark select:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"]),
+.dark textarea:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"]),
+input[class*="bg-slate-950"],
+input[class*="bg-slate-900"],
+input[class*="bg-slate-800"],
+select[class*="bg-slate-950"],
+select[class*="bg-slate-900"],
+select[class*="bg-slate-800"] {
+  color: #ffffff !important;
+}
+
+.dark input:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"])::placeholder,
+.dark select:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"])::placeholder,
+.dark textarea:not([class*="bg-white"]):not([class*="bg-slate-50"]):not([class*="bg-slate-100"])::placeholder,
+input[class*="bg-slate-950"]::placeholder,
+input[class*="bg-slate-900"]::placeholder,
+input[class*="bg-slate-800"]::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Light / White background inputs (POS barcode, search, forms, modals) always maintain solid black text */
+input[class*="bg-white"],
+input[class*="bg-slate-50"],
+input[class*="bg-slate-100"],
+select[class*="bg-white"],
+select[class*="bg-slate-50"],
+.bg-white input,
+.bg-white select,
+.bg-white textarea,
+#digital-receipt-print-area input,
+#whatsapp-receipt-slip-area input {
+  color: #000000 !important;
+}
+
+input[class*="bg-white"]::placeholder,
+input[class*="bg-slate-50"]::placeholder,
+.bg-white input::placeholder {
+  color: #666666 !important;
+}
+
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+  font-feature-settings: 'tnum' on, 'lnum' on;
+}
+
+/* Thermal receipt printable styling */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #thermal-receipt-print-area, #thermal-receipt-print-area * {
+    visibility: visible;
+  }
+  #thermal-receipt-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    padding: 2mm !important;
+    background: white !important;
+    color: black !important;
+  }
+  @page {
+    margin: 0;
+    size: 80mm auto;
+  }
+}
+
+/* Right-side scrollbar styling for popups and containers */
+.custom-scrollbar {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) rgba(241, 245, 249, 0.4);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.5);
+  border-radius: 9999px;
+  margin: 4px 0;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.6);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.9);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: rgba(100, 116, 139, 0.7) rgba(30, 41, 59, 0.6);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.7);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
+}
+
+/* Modal Popup container standard right scrollbar */
+.modal-popup-body {
+  max-height: calc(88vh - 120px);
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.modal-popup-body::-webkit-scrollbar {
+  width: 7px;
+}
+
+.modal-popup-body::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.modal-popup-body::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+}
+
+.dark .modal-popup-body {
+  scrollbar-color: #64748b #1e293b;
+}
+
+.dark .modal-popup-body::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark .modal-popup-body::-webkit-scrollbar-thumb {
+  background: #64748b;
+}
+
+/* Desktop view horizontal bottom scrollbar */
+.desktop-nav-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.5) rgba(226, 232, 240, 0.6);
+  padding-bottom: 4px;
+}
+
+.desktop-nav-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.desktop-nav-scrollbar::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.6);
+  border-radius: 9999px;
+}
+
+.desktop-nav-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.6);
+  border-radius: 9999px;
+}
+
+.desktop-nav-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(79, 70, 229, 0.9);
+}
+
+.dark .desktop-nav-scrollbar {
+  scrollbar-color: rgba(129, 140, 248, 0.6) rgba(30, 41, 59, 0.8);
+}
+
+.dark .desktop-nav-scrollbar::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.dark .desktop-nav-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 248, 0.6);
+}
+
+/* ========================================================================== */
+/* DYNAMIC SAAS THEMES ENGINE (Real-time Full UI Transformation)              */
+/* ========================================================================== */
+:root, [data-pos-theme="theme-emerald"] {
+  --theme-primary: #059669;
+  --theme-primary-hover: #047857;
+  --theme-accent: #10b981;
+  --theme-sidebar-bg: #0f172a;
+  --theme-active-pill: #059669;
+  --theme-border: rgba(16, 185, 129, 0.3);
+  --theme-glow: 0 0 20px rgba(16, 185, 129, 0.35);
+  --theme-card-header: linear-gradient(135deg, #059669, #0f766e);
+}
+
+[data-pos-theme="theme-midnight-cyber"] {
+  --theme-primary: #06b6d4;
+  --theme-primary-hover: #0891b2;
+  --theme-accent: #22c55e;
+  --theme-sidebar-bg: #020617;
+  --theme-active-pill: #0891b2;
+  --theme-border: rgba(6, 182, 212, 0.45);
+  --theme-glow: 0 0 25px rgba(6, 182, 212, 0.5);
+  --theme-card-header: linear-gradient(135deg, #0891b2, #1e1b4b);
+}
+
+[data-pos-theme="theme-royal-navy"] {
+  --theme-primary: #2563eb;
+  --theme-primary-hover: #1d4ed8;
+  --theme-accent: #f59e0b;
+  --theme-sidebar-bg: #0f172a;
+  --theme-active-pill: #2563eb;
+  --theme-border: rgba(59, 130, 246, 0.4);
+  --theme-glow: 0 0 20px rgba(59, 130, 246, 0.4);
+  --theme-card-header: linear-gradient(135deg, #1d4ed8, #312e81);
+}
+
+[data-pos-theme="theme-crimson-luxury"] {
+  --theme-primary: #e11d48;
+  --theme-primary-hover: #be123c;
+  --theme-accent: #fbbf24;
+  --theme-sidebar-bg: #18181b;
+  --theme-active-pill: #e11d48;
+  --theme-border: rgba(225, 29, 72, 0.45);
+  --theme-glow: 0 0 22px rgba(225, 29, 72, 0.45);
+  --theme-card-header: linear-gradient(135deg, #be123c, #4c0519);
+}
+
+[data-pos-theme="theme-amber-sunset"] {
+  --theme-primary: #d97706;
+  --theme-primary-hover: #b45309;
+  --theme-accent: #ea580c;
+  --theme-sidebar-bg: #1c1917;
+  --theme-active-pill: #d97706;
+  --theme-border: rgba(217, 119, 6, 0.45);
+  --theme-glow: 0 0 22px rgba(217, 119, 6, 0.45);
+  --theme-card-header: linear-gradient(135deg, #d97706, #7c2d12);
+}
+
+[data-pos-theme="theme-oled-gold"] {
+  --theme-primary: #ca8a04;
+  --theme-primary-hover: #a16207;
+  --theme-accent: #facc15;
+  --theme-sidebar-bg: #000000;
+  --theme-active-pill: #ca8a04;
+  --theme-border: rgba(234, 179, 8, 0.5);
+  --theme-glow: 0 0 25px rgba(234, 179, 8, 0.55);
+  --theme-card-header: linear-gradient(135deg, #a16207, #000000);
+}
+
+[data-pos-theme="theme-nordic-zinc"] {
+  --theme-primary: #475569;
+  --theme-primary-hover: #334155;
+  --theme-accent: #0d9488;
+  --theme-sidebar-bg: #09090b;
+  --theme-active-pill: #0d9488;
+  --theme-border: rgba(20, 184, 166, 0.4);
+  --theme-glow: 0 0 20px rgba(20, 184, 166, 0.4);
+  --theme-card-header: linear-gradient(135deg, #334155, #0f172a);
+}
+
+/* Global live theme elements */
+.theme-active-nav {
+  background-color: var(--theme-active-pill) !important;
+  box-shadow: var(--theme-glow) !important;
+  color: #ffffff !important;
+}
+
+.theme-accent-badge {
+  color: var(--theme-accent) !important;
+  border-color: var(--theme-border) !important;
+}
+
+.theme-primary-btn {
+  background-color: var(--theme-primary) !important;
+}
+.theme-primary-btn:hover {
+  background-color: var(--theme-primary-hover) !important;
+}
+
+.theme-glow-card {
+  box-shadow: var(--theme-glow) !important;
+  border-color: var(--theme-border) !important;
+}
+
