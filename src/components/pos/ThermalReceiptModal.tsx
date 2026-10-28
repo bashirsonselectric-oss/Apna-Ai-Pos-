@@ -526,8 +526,21 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
 
               {/* Footer Box: Light gray container with QR & payment status */}
               <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between gap-3 mt-3">
-                <div className="shrink-0">
-                  <QrCode className="w-8 h-8 text-slate-800 bg-white p-1 rounded-md border border-slate-200 shadow-2xs" />
+                <div className="shrink-0 flex items-center gap-2">
+                  {storeProfile.paymentQrUrl ? (
+                    <img
+                      src={storeProfile.paymentQrUrl}
+                      alt="Store Payment QR"
+                      className="w-9 h-9 object-contain bg-white p-0.5 rounded-md border border-slate-300 shadow-2xs"
+                    />
+                  ) : (
+                    <QrCode className="w-8 h-8 text-slate-800 bg-white p-1 rounded-md border border-slate-200 shadow-2xs" />
+                  )}
+                  {storeProfile.paymentQrUrl && (
+                    <span className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">
+                      {storeProfile.paymentQrType?.toUpperCase() || 'RAAST'} QR
+                    </span>
+                  )}
                 </div>
                 <div className="text-right flex items-center gap-2">
                   <span className="text-[11px] font-mono font-bold text-slate-700">
@@ -650,6 +663,32 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
                   {storeProfile.currency} {receipt.grandTotal.toLocaleString()}
                 </span>
               </div>
+
+              {/* Payment QR Code on Digital Invoice */}
+              {storeProfile.paymentQrUrl && (
+                <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl">
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-bold text-slate-900 text-[11px] uppercase tracking-wide">
+                      Instant Scan & Pay ({storeProfile.paymentQrType?.toUpperCase() || 'RAAST / BANK'})
+                    </div>
+                    {storeProfile.paymentQrAccountNo && (
+                      <div className="font-mono font-bold text-indigo-700 text-[11px]">
+                        Account/Till: {storeProfile.paymentQrAccountNo}
+                      </div>
+                    )}
+                    {storeProfile.paymentQrAccountTitle && (
+                      <div className="text-[10px] text-slate-500">
+                        Title: {storeProfile.paymentQrAccountTitle}
+                      </div>
+                    )}
+                  </div>
+                  <img
+                    src={storeProfile.paymentQrUrl}
+                    alt="Payment QR"
+                    className="w-16 h-16 object-contain rounded-lg bg-white border border-slate-300 p-1 shadow-2xs shrink-0"
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -693,6 +732,32 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
                   <span>{storeProfile.currency} {receipt.grandTotal.toLocaleString()}</span>
                 </div>
               </div>
+
+              {/* Payment QR Code on Thermal Receipt Paper */}
+              {storeProfile.paymentQrUrl && (
+                <div className="py-2.5 flex flex-col items-center justify-center border-b border-dashed border-black text-center space-y-1">
+                  <div className="p-1 bg-white border border-black inline-block rounded-xs">
+                    <img
+                      src={storeProfile.paymentQrUrl}
+                      alt="Thermal Payment QR"
+                      className="w-24 h-24 object-contain filter contrast-150"
+                    />
+                  </div>
+                  <div className="text-[10px] uppercase font-bold tracking-wider">
+                    SCAN TO PAY ({storeProfile.paymentQrType?.toUpperCase() || 'RAAST'})
+                  </div>
+                  {storeProfile.paymentQrAccountNo && (
+                    <div className="text-[9px] font-mono font-bold">
+                      {storeProfile.paymentQrAccountNo}
+                    </div>
+                  )}
+                  {storeProfile.paymentQrAccountTitle && (
+                    <div className="text-[9px] text-gray-700 truncate max-w-[200px]">
+                      {storeProfile.paymentQrAccountTitle}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-2 text-center text-[10px] text-gray-600">
                 {storeProfile.receiptFooter}

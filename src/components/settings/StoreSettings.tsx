@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { usePos } from '../../context/PosContext';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
 import { BusinessVertical } from '../../types';
@@ -25,6 +25,9 @@ import {
   Upload,
   Trash2,
   ZoomIn,
+  Printer,
+  CheckCircle2,
+  FileText,
 } from 'lucide-react';
 
 export const StoreSettings: React.FC = () => {
@@ -57,6 +60,25 @@ export const StoreSettings: React.FC = () => {
   const [gatewaysForm, setGatewaysForm] = useState(paymentGateways);
   const [selectedQrMethod, setSelectedQrMethod] = useState<'jazzcash' | 'easypaisa' | 'bank'>('jazzcash');
   const [copiedQr, setCopiedQr] = useState(false);
+
+  // Dedicated Thermal Receipt Custom Payment QR State
+  const receiptQrFileInputRef = useRef<HTMLInputElement>(null);
+  const [receiptQrUrl, setReceiptQrUrl] = useState<string>(storeProfile.paymentQrUrl || '');
+  const [receiptQrType, setReceiptQrType] = useState<'raast' | 'jazzcash' | 'easypaisa' | 'bank' | 'general'>(
+    storeProfile.paymentQrType || 'raast'
+  );
+  const [receiptQrTitle, setReceiptQrTitle] = useState<string>(
+    storeProfile.paymentQrAccountTitle || storeProfile.name || ''
+  );
+  const [receiptQrAccountNo, setReceiptQrAccountNo] = useState<string>(
+    storeProfile.paymentQrAccountNo || storeProfile.phone || ''
+  );
+  const [receiptQrBankName, setReceiptQrBankName] = useState<string>(
+    storeProfile.paymentQrBankName || 'Meezan Bank / SBP Raast'
+  );
+  const [receiptQrSavedSuccess, setReceiptQrSavedSuccess] = useState(false);
+  const [receiptQrUploadTimestamp, setReceiptQrUploadTimestamp] = useState<number>(Date.now());
+  const [isNewlyUploaded, setIsNewlyUploaded] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,6 +130,62 @@ export const StoreSettings: React.FC = () => {
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleThermalReceiptQrUpload = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (PNG, JPG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image file is too large. Please select an image under 5MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (!dataUrl) return;
+
+      setReceiptQrUrl(dataUrl);
+      setReceiptQrUploadTimestamp(Date.now());
+      setIsNewlyUploaded(true);
+      setTimeout(() => setIsNewlyUploaded(false), 2500);
+
+      updateStoreProfile({
+        paymentQrUrl: dataUrl,
+        paymentQrType: receiptQrType,
+        paymentQrAccountTitle: receiptQrTitle,
+        paymentQrAccountNo: receiptQrAccountNo,
+        paymentQrBankName: receiptQrBankName,
+      });
+      setReceiptQrSavedSuccess(true);
+      setTimeout(() => setReceiptQrSavedSuccess(false), 3000);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveReceiptQrDetails = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    updateStoreProfile({
+      paymentQrUrl: receiptQrUrl,
+      paymentQrType: receiptQrType,
+      paymentQrAccountTitle: receiptQrTitle,
+      paymentQrAccountNo: receiptQrAccountNo,
+      paymentQrBankName: receiptQrBankName,
+    });
+    setReceiptQrSavedSuccess(true);
+    setTimeout(() => setReceiptQrSavedSuccess(false), 3000);
+  };
+
+  const handleRemoveThermalReceiptQr = () => {
+    if (confirm('Are you sure you want to remove the custom QR code from all thermal receipts?')) {
+      setReceiptQrUrl('');
+      updateStoreProfile({
+        paymentQrUrl: '',
+      });
+      setReceiptQrUploadTimestamp(Date.now());
+    }
   };
 
   const saasPlans = [
@@ -450,6 +528,299 @@ export const StoreSettings: React.FC = () => {
             >
               Reset to Defaults
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* NEW SETTINGS SECTION: Custom Thermal Receipt Payment QR Code */}
+      {/* ======================================================== */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+          <div className="flex items-center space-x-3">
+            <span className="p-2.5 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+              <Printer className="w-6 h-6" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-base sm:text-lg text-slate-900">
+                  Custom Thermal Receipt Payment QR Code
+                </h3>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Auto-Print on Bills
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Upload a custom payment QR image from your device. This QR code will automatically appear on all printed 80mm & 58mm thermal receipts, digital vouchers, and WhatsApp bill cards.
+              </p>
+            </div>
+          </div>
+
+          {receiptQrSavedSuccess && (
+            <span className="text-xs text-emerald-600 font-bold flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200 animate-in fade-in">
+              <Check className="w-4 h-4" /> Thermal QR Settings Saved!
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left 7 Columns: File Upload & QR Identification Settings */}
+          <div className="lg:col-span-7 space-y-5">
+            {/* Device File Upload Box */}
+            <div>
+              <label className="block text-xs font-bold text-slate-800 mb-2 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Upload className="w-4 h-4 text-indigo-600" /> Upload QR Code Image from Device *
+                </span>
+                <span className="text-[11px] font-normal text-slate-500">PNG, JPG, WebP (Max 5MB)</span>
+              </label>
+
+              <input
+                ref={receiptQrFileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleThermalReceiptQrUpload(file);
+                }}
+                className="hidden"
+              />
+
+              {receiptQrUrl ? (
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center space-x-3.5 w-full sm:w-auto">
+                    <img
+                      src={receiptQrUrl}
+                      alt="Uploaded QR Code"
+                      className="w-16 h-16 object-contain rounded-xl border border-slate-300 bg-white p-1 shadow-2xs shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {receiptQrTitle || 'Custom Payment QR'}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 text-emerald-800">
+                          Active
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-mono text-slate-600 truncate mt-0.5">
+                        {receiptQrAccountNo || receiptQrType.toUpperCase()}
+                      </p>
+                      <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
+                        <Check className="w-3 h-3" /> Enabled on all thermal receipts
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => receiptQrFileInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Replace Image</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemoveThermalReceiptQr}
+                      className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onClick={() => receiptQrFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/20 rounded-2xl p-6 text-center cursor-pointer transition-all group"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 group-hover:scale-110 flex items-center justify-center mx-auto mb-2 transition-transform shadow-xs">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
+                    Click to browse and upload QR code image
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
+                    Upload a high-contrast screenshot or photo of your Raast, JazzCash, EasyPaisa, or Bank QR code.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Gateway Type Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Payment QR Gateway Category:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'raast', label: 'SBP Raast', icon: Landmark, color: 'text-indigo-600' },
+                  { id: 'jazzcash', label: 'JazzCash', icon: Smartphone, color: 'text-rose-600' },
+                  { id: 'easypaisa', label: 'EasyPaisa', icon: Smartphone, color: 'text-emerald-600' },
+                  { id: 'bank', label: 'Bank IBAN', icon: Building, color: 'text-blue-600' },
+                ].map((type) => {
+                  const IconComp = type.icon;
+                  const active = receiptQrType === type.id;
+                  return (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => setReceiptQrType(type.id as any)}
+                      className={`p-2 rounded-xl border flex items-center space-x-2 transition-all font-bold ${
+                        active
+                          ? 'border-indigo-600 bg-indigo-50/60 text-indigo-950 shadow-2xs ring-1 ring-indigo-500'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <IconComp className={`w-4 h-4 ${type.color}`} />
+                      <span className="truncate">{type.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Account Identification Inputs */}
+            <form onSubmit={handleSaveReceiptQrDetails} className="space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Merchant Account Title:
+                  </label>
+                  <input
+                    type="text"
+                    value={receiptQrTitle}
+                    onChange={(e) => setReceiptQrTitle(e.target.value)}
+                    placeholder="e.g. Bashir Sons Electric"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-800 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Till ID / Account / Raast Number:
+                  </label>
+                  <input
+                    type="text"
+                    value={receiptQrAccountNo}
+                    onChange={(e) => setReceiptQrAccountNo(e.target.value)}
+                    placeholder="e.g. 03008765432 or PK45..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono font-bold text-slate-800"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    Bank / Wallet Service Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={receiptQrBankName}
+                    onChange={(e) => setReceiptQrBankName(e.target.value)}
+                    placeholder="e.g. Meezan Bank Ltd / SBP Raast Real-time"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-all flex items-center space-x-1.5"
+                >
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>Save Thermal Receipt QR Settings</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Right 5 Columns: Live Thermal Receipt Preview with Smooth Transition Animation */}
+          <div className="lg:col-span-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Printer className="w-3.5 h-3.5 text-slate-500" /> Live Thermal Ticket Simulation (80mm)
+              </span>
+              <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                Ready to Print
+              </span>
+            </div>
+
+            {/* Miniature Thermal Paper Slip */}
+            <div className="bg-white text-slate-900 p-5 rounded-2xl shadow-md border border-slate-300 font-mono text-[11px] leading-tight space-y-3">
+              <div className="text-center pb-2 border-b border-dashed border-slate-400">
+                <div className="font-bold text-xs uppercase tracking-wide">{storeProfile.name}</div>
+                <div className="text-[10px] text-slate-600 mt-0.5">{storeProfile.address}</div>
+                <div className="text-[10px] text-slate-600 font-bold">Tel: {storeProfile.phone}</div>
+              </div>
+
+              <div className="flex justify-between text-[10px] text-slate-600 pb-1 border-b border-dashed border-slate-300">
+                <span>INV: <strong>#INV-7842</strong></span>
+                <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+
+              <div className="space-y-1 text-[10px] pb-2 border-b border-dashed border-slate-300">
+                <div className="flex justify-between">
+                  <span>Clipsal Switch 1-Way (White)</span>
+                  <span className="font-bold">Rs. 2,400</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between font-bold text-xs pb-2 border-b border-slate-800">
+                <span>TOTAL:</span>
+                <span className="text-emerald-700">Rs. 2,400</span>
+              </div>
+
+              {/* QR Code Display Area with Smooth Elegant Fade-in Transition Animation */}
+              <div
+                key={receiptQrUploadTimestamp}
+                className={`transition-all duration-700 ease-out transform animate-in fade-in zoom-in-95 my-2 p-3 rounded-xl border flex flex-col items-center justify-center text-center ${
+                  isNewlyUploaded
+                    ? 'border-emerald-500 bg-emerald-50/80 ring-4 ring-emerald-400/30 shadow-lg scale-102'
+                    : 'border-slate-300 bg-slate-50'
+                }`}
+              >
+                {receiptQrUrl ? (
+                  <div className="flex flex-col items-center space-y-1.5 transition-all duration-500">
+                    <span className="text-[9px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" /> Printed on All Thermal Bills
+                    </span>
+                    <img
+                      src={receiptQrUrl}
+                      alt="Thermal Receipt Custom Payment QR"
+                      className="w-32 h-32 object-contain bg-white rounded-lg p-1 border border-slate-300 shadow-2xs transition-transform duration-500 hover:scale-105"
+                    />
+                    <div className="text-center font-mono">
+                      <div className="text-[10px] font-bold text-slate-900 uppercase">
+                        Scan to Pay ({receiptQrType.toUpperCase()})
+                      </div>
+                      <div className="text-[10px] font-bold text-indigo-700">
+                        {receiptQrAccountNo || 'Till / Account Number'}
+                      </div>
+                      <div className="text-[9px] text-slate-500 truncate max-w-[200px]">
+                        {receiptQrTitle}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-5 px-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center mx-auto mb-1.5">
+                      <QrCode className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs font-bold text-slate-700">No Custom QR Uploaded</div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Upload image from device to display on paper receipt
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="text-center text-[9px] text-slate-500 pt-1">
+                {storeProfile.receiptFooter}
+              </div>
+            </div>
           </div>
         </div>
       </div>
