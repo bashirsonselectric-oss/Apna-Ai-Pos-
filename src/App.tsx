@@ -56,16 +56,21 @@ function PosAppContent() {
   const isMasterAdmin = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
   const isUserAdmin = effectiveRole === 'admin' || userSession.role === 'admin' || isMasterAdmin;
 
-  // Enforce RBAC Tab Permissions & Admin Hiding: non-admin user accounts cannot access admin or staff_roles
+  // Enforce Super Admin & RBAC Access: Admin Panel ONLY accessible by bashirsonselectric@gmail.com
+  // Strictly hidden and redirected for all other user accounts
   React.useEffect(() => {
-    if (!isUserAdmin && (activeTab === 'admin' || activeTab === 'staff_roles')) {
+    if (activeTab === 'admin' && !isMasterAdmin) {
+      setActiveTab('dashboard');
+      return;
+    }
+    if (!isUserAdmin && activeTab === 'staff_roles') {
       setActiveTab('dashboard');
       return;
     }
     if (!isTabAllowedForRole(activeTab)) {
       setActiveTab('pos');
     }
-  }, [activeTab, isTabAllowedForRole, isUserAdmin]);
+  }, [activeTab, isTabAllowedForRole, isMasterAdmin, isUserAdmin]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isCustomItemOpen, setIsCustomItemOpen] = useState(false);
   const [isPriceAdjusterOpen, setIsPriceAdjusterOpen] = useState(false);

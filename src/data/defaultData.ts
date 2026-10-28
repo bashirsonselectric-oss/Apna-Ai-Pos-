@@ -2597,8 +2597,23 @@ export const INITIAL_BILL_TEMPLATES: BillTemplate[] = [
 // ============================================================================
 export const SAAS_THEME_PRESETS: SaaSThemePreset[] = [
   {
+    id: 'theme-cryptoin-purple',
+    name: 'GoDigly Obsidian Purple (Cryptoin)',
+    tagline: 'Vibrant purple gradients, deep obsidian cards & neon glow',
+    primaryColor: '#9333ea',
+    secondaryColor: '#0e0f17',
+    accentColor: '#a855f7',
+    badgeBg: 'bg-purple-500/20',
+    badgeText: 'text-purple-300',
+    gradient: 'from-purple-600 via-indigo-700 to-slate-900',
+    previewBg: 'bg-[#0e0f17]',
+    description: 'Sleek modular dark dashboard with neon purple gradient cards, live trend charts, quick checkout terminal and luminous active indicators.',
+    isPopular: true,
+  },
+  {
     id: 'theme-emerald',
     name: 'Emerald Professional',
+
     tagline: 'Modern retail industry standard',
     primaryColor: '#059669',
     secondaryColor: '#0f172a',

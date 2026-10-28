@@ -19,8 +19,11 @@ import {
   CheckCircle2,
   Trash2,
   MessageCircle,
+  LayoutDashboard,
+  Zap,
 } from 'lucide-react';
 import { usePos } from '../../context/PosContext';
+import { CryptoinModularDashboard } from './CryptoinModularDashboard';
 
 interface DashboardViewProps {
   onNavigate: (tab: any) => void;
@@ -44,10 +47,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     setCurrentReceipt,
   } = usePos();
 
+  // Active Layout: Default is 'cryptoin' (the requested Obsidian Purple Modular Layout from the screenshot)
+  const [activeLayout, setActiveLayout] = useState<'cryptoin' | 'classic'>(() => {
+    try {
+      const saved = localStorage.getItem('godigly_active_dashboard_layout');
+      return saved === 'classic' ? 'classic' : 'cryptoin';
+    } catch {
+      return 'cryptoin';
+    }
+  });
+
+  const handleSwitchLayout = (layout: 'cryptoin' | 'classic') => {
+    setActiveLayout(layout);
+    localStorage.setItem('godigly_active_dashboard_layout', layout);
+  };
+
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month'>('today');
   const [isTriggeringAi, setIsTriggeringAi] = useState(false);
   const [aiSuccessMsg, setAiSuccessMsg] = useState<string | null>(null);
   const [zeroFeedback, setZeroFeedback] = useState<string | null>(null);
+
 
   const handleZeroBalances = () => {
     resetAllData();
@@ -117,79 +136,114 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Header & Filter Bar */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+      {/* Top Header & Layout Switcher Bar */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-[#171825] p-5 rounded-3xl border border-white/5 shadow-2xl">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-              Executive Store Dashboard
+            <div className="w-8 h-8 rounded-xl bg-purple-600/30 text-purple-400 flex items-center justify-center font-black">
+              <Zap className="w-4 h-4 text-purple-400" />
+            </div>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+              GoDigly POS Dashboard
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300">
-              Live Real-Time
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
+              Active Layout
             </span>
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Overview of total sales, net profits, customer recovery, and stock health for <span className="font-semibold text-slate-700 dark:text-slate-300">{storeProfile.name}</span>
+          <p className="text-xs text-slate-400 mt-1">
+            Dark-themed modular layout with real-time sales curves, register balance, and fast checkout terminal for <strong className="text-purple-300 font-semibold">{storeProfile.name}</strong>
           </p>
         </div>
 
         <div className="flex items-center flex-wrap gap-2 w-full md:w-auto">
-          {/* Time Filter Tabs */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+          {/* Layout Mode Switcher */}
+          <div className="flex items-center bg-[#10111a] p-1 rounded-2xl border border-white/5 text-xs font-bold">
             <button
-              onClick={() => setDateFilter('today')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                dateFilter === 'today'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              onClick={() => handleSwitchLayout('cryptoin')}
+              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeLayout === 'cryptoin'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 font-extrabold'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              Today
+              <Zap className="w-3.5 h-3.5 text-amber-300" />
+              <span>Obsidian Purple (Active)</span>
             </button>
             <button
-              onClick={() => setDateFilter('month')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                dateFilter === 'month'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              onClick={() => handleSwitchLayout('classic')}
+              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeLayout === 'classic'
+                  ? 'bg-slate-800 text-white shadow-xs font-bold'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              This Month
-            </button>
-            <button
-              onClick={() => setDateFilter('all')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
-                dateFilter === 'all'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              All Time
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>Classic Grid</span>
             </button>
           </div>
 
           {/* Quick Zero All Balances Action */}
           <button
             onClick={handleZeroBalances}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-700 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-95"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#10111a] hover:bg-rose-950/40 text-slate-300 hover:text-rose-400 border border-white/5 rounded-2xl text-xs font-bold transition-all shadow-2xs active:scale-95"
             title="Reset store metrics: sales, returns, udhar, and stock to strictly 0"
           >
             <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
-            <span>Reset to 0 Balance</span>
-          </button>
-
-          {/* AI WhatsApp Dispatch Button */}
-          <button
-            onClick={handleTriggerAiReport}
-            disabled={isTriggeringAi}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Send formatted daily business summary to owner's WhatsApp"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            {isTriggeringAi ? 'Generating AI...' : 'AI Daily WhatsApp'}
+            <span>Reset 0 Balance</span>
           </button>
         </div>
       </div>
+
+      {/* ACTIVE LAYOUT: Cryptoin Modular Layout (Matches attached screenshot) */}
+      {activeLayout === 'cryptoin' ? (
+        <CryptoinModularDashboard onNavigate={onNavigate} />
+      ) : (
+        <>
+          {/* Classic Grid Filter Bar */}
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+              <button
+                onClick={() => setDateFilter('today')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  dateFilter === 'today'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setDateFilter('month')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  dateFilter === 'month'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                This Month
+              </button>
+              <button
+                onClick={() => setDateFilter('all')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  dateFilter === 'all'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All Time
+              </button>
+            </div>
+
+            <button
+              onClick={handleTriggerAiReport}
+              disabled={isTriggeringAi}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {isTriggeringAi ? 'Generating AI...' : 'AI Daily WhatsApp'}
+            </button>
+          </div>
+
 
       {/* Zero Feedback Toast */}
       {zeroFeedback && (
@@ -564,6 +618,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

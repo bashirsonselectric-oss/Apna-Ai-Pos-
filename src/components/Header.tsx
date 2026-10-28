@@ -7,7 +7,15 @@ import {
   WifiOff,
   Cloud,
   CloudOff,
+  Bell,
+  Plus,
+  Moon,
+  Sun,
+  Zap,
+  Sparkles,
+  User,
 } from 'lucide-react';
+
 
 interface HeaderProps {
   onOpenAiHub?: () => void;
@@ -21,6 +29,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
+  onOpenQuickSale,
+  onOpenProfileModal,
 }) => {
   const {
     storeProfile,
@@ -31,7 +41,11 @@ export const Header: React.FC<HeaderProps> = ({
     lastSyncTime,
     syncOfflineSales,
     sales,
+    userSession,
+    theme,
+    toggleTheme,
   } = usePos();
+
 
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
@@ -172,6 +186,67 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Right: Cryptoin Style Greeting, Quick Bill Button & Profile Avatar */}
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            {/* Cashier Greeting */}
+            <div className="hidden lg:flex items-center space-x-1.5 text-xs text-slate-300 font-medium">
+              <span>Hi</span>
+              <strong className="text-white font-bold">
+                {userSession.displayName ? userSession.displayName.split(' ')[0] : 'Bashir'}
+              </strong>
+              <span>👋</span>
+            </div>
+
+            {/* Light / Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+              title="Toggle Light / Dark Mode"
+            >
+              {theme === 'dark' ? (
+                <Moon className="w-4 h-4 text-purple-400" />
+              ) : (
+                <Sun className="w-4 h-4 text-amber-400" />
+              )}
+            </button>
+
+            {/* Fast Action Quick Bill Button (Vibrant Purple Pill matching the screenshot's 'Send & Receive' button) */}
+            {onOpenQuickSale && (
+              <button
+                type="button"
+                onClick={onOpenQuickSale}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(168,85,247,0.4)] transition-all cursor-pointer active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">+ Quick Bill (F2)</span>
+                <span className="sm:hidden">Bill</span>
+              </button>
+            )}
+
+            {/* Notification Bell */}
+            <button
+              type="button"
+              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors relative"
+              title="Notifications"
+            >
+              <Bell className="w-4 h-4 text-slate-300" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+            </button>
+
+            {/* Cashier Avatar */}
+            {onOpenProfileModal && (
+              <button
+                type="button"
+                onClick={onOpenProfileModal}
+                className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center font-bold text-xs text-white ring-2 ring-purple-500/50 hover:ring-purple-400 transition-all cursor-pointer shadow-md"
+                title="Cashier Profile & QR Settings"
+              >
+                {userSession.displayName ? userSession.displayName.charAt(0) : 'B'}
+              </button>
+            )}
           </div>
 
         </div>

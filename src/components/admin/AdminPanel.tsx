@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { usePos } from '../../context/PosContext';
+import { AdminOtpLock } from './AdminOtpLock';
+import { SupabaseCloudHub } from './SupabaseCloudHub';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -63,7 +65,11 @@ interface UserTableRow {
   created_at: string;
 }
 
-export const AdminPanel: React.FC = () => {
+interface AdminPanelContentProps {
+  onLock: () => void;
+}
+
+const AdminPanelContent: React.FC<AdminPanelContentProps> = ({ onLock }) => {
   const {
     userSession,
     googleSignIn,
@@ -100,7 +106,7 @@ export const AdminPanel: React.FC = () => {
   } = usePos();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
-    'users' | 'plans' | 'logo' | 'deals' | 'payments' | 'chats' | 'ai_config' | 'limits' | 'tenants' | 'database' | 'security'
+    'users' | 'plans' | 'logo' | 'deals' | 'payments' | 'chats' | 'ai_config' | 'limits' | 'tenants' | 'database' | 'supabase' | 'security'
   >('users');
 
   // Database Direct Admin Login State
@@ -152,127 +158,8 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  // STRICT ACCESS CONTROL: Only bashirsonselectric@gmail.com can open Admin Panel
-  const isAuthorized = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
-
-  if (!isAuthorized) {
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-12 space-y-6">
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-8 space-y-6">
-          {/* Header */}
-          <div className="text-center space-y-2">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-inner">
-              <Database className="w-8 h-8" />
-            </div>
-
-            <span className="text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200">
-              Admin Panel Database Connection & Login
-            </span>
-
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              Master Admin Database Authentication
-            </h2>
-
-            <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-              Connect to the live database and authenticate as master store administrator to unlock system configuration.
-            </p>
-          </div>
-
-          {/* Database Live Ping & Engine Status */}
-          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
-            <div className="flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-bold text-slate-800 dark:text-slate-200">
-                DB Status: {databaseStatus.status}
-              </span>
-            </div>
-            <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              Latency: <strong className="text-emerald-600 font-bold">{databaseStatus.pingMs} ms</strong> • Port: {databaseStatus.port}
-            </div>
-          </div>
-
-          {adminDbError && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-2">
-              <AlertOctagon className="w-4 h-4 shrink-0" />
-              <span>{adminDbError}</span>
-            </div>
-          )}
-
-          {adminDbSuccess && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>{adminDbSuccess}</span>
-            </div>
-          )}
-
-          {/* Direct Database Login Form */}
-          <form onSubmit={handleAdminDatabaseLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Admin Database Email
-              </label>
-              <input
-                type="email"
-                required
-                value={adminDbEmail}
-                onChange={(e) => setAdminDbEmail(e.target.value)}
-                placeholder="bashirsonselectric@gmail.com"
-                className="w-full px-3.5 py-2.5 text-xs border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 dark:text-white font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Database PBKDF2 Password
-              </label>
-              <input
-                type="password"
-                required
-                value={adminDbPassword}
-                onChange={(e) => setAdminDbPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 text-xs border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 dark:text-white font-mono"
-              />
-              <div className="text-[10px] text-slate-400 mt-1 flex justify-between">
-                <span>Default Seed: <code className="text-slate-600 dark:text-slate-300">admin123</code></span>
-                <span className="text-emerald-600 font-mono">HMAC-SHA512 Verified</span>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={adminDbLoading}
-              className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
-            >
-              {adminDbLoading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Connecting to Database & Verifying Hash...</span>
-                </>
-              ) : (
-                <>
-                  <Key className="w-4 h-4 text-emerald-400" />
-                  <span>Connect Database & Login</span>
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Quick 1-Click Authenticate */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
-            <button
-              type="button"
-              onClick={() => googleSignIn('bashirsonselectric@gmail.com', 'Muhammad Bashir & Sons')}
-              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
-            >
-              Or Quick One-Click Connect as bashirsonselectric@gmail.com
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
   const [isNewTenantModal, setIsNewTenantModal] = useState(false);
+
   const [tenantName, setTenantName] = useState('');
   const [tenantStoreName, setTenantStoreName] = useState('');
   const [tenantEmail, setTenantEmail] = useState('');
@@ -520,10 +407,25 @@ export const AdminPanel: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white/10 backdrop-blur-xs p-3 rounded-2xl border border-white/10 text-right text-xs">
-          <div className="text-slate-400 text-[10px] uppercase font-semibold">Security Token</div>
-          <div className="font-mono text-emerald-400 font-bold">AUTH-BASHIR-SONS-OK</div>
-          <div className="text-[10px] text-slate-300">Level: Super Admin</div>
+        <div className="flex items-center gap-3">
+          <div className="bg-white/10 backdrop-blur-xs p-3 rounded-2xl border border-white/10 text-right text-xs">
+            <div className="text-slate-400 text-[10px] uppercase font-semibold">Security Status</div>
+            <div className="font-mono text-emerald-400 font-bold flex items-center justify-end gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Email OTP Verified</span>
+            </div>
+            <div className="text-[10px] text-slate-300">Level: Super Admin Only</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onLock}
+            className="py-2.5 px-3.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-rose-300 hover:text-rose-200 border border-rose-500/40 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+            title="Lock Admin Panel immediately requiring Email OTP to re-enter"
+          >
+            <Lock className="w-3.5 h-3.5 text-rose-400" />
+            <span>Lock Admin</span>
+          </button>
         </div>
       </div>
 
@@ -650,6 +552,18 @@ export const AdminPanel: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveAdminTab('supabase')}
+          className={`pb-2.5 text-xs sm:text-sm font-bold flex items-center space-x-2 border-b-2 transition-all whitespace-nowrap ${
+            activeAdminTab === 'supabase'
+              ? 'border-emerald-500 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <Database className="w-4 h-4 text-emerald-400" />
+          <span>Supabase Cloud Database</span>
+        </button>
+
+        <button
           onClick={() => setActiveAdminTab('security')}
           className={`pb-2.5 text-xs sm:text-sm font-bold flex items-center space-x-2 border-b-2 transition-all whitespace-nowrap ${
             activeAdminTab === 'security'
@@ -661,6 +575,7 @@ export const AdminPanel: React.FC = () => {
           <span>Change Password</span>
         </button>
       </div>
+
 
       {/* ---------------- TAB 1: USER & CASHIER MANAGEMENT ---------------- */}
       {activeAdminTab === 'users' && (
@@ -2276,8 +2191,12 @@ jobs:
         </div>
       )}
 
+      {/* ---------------- TAB: SUPABASE CLOUD BACKEND HUB ---------------- */}
+      {activeAdminTab === 'supabase' && <SupabaseCloudHub />}
+
       {/* Modal: Add New Business Tenant */}
       {isNewTenantModal && (
+
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
@@ -2713,3 +2632,36 @@ jobs:
     </div>
   );
 };
+
+export const AdminPanel: React.FC = () => {
+  const { userSession } = usePos();
+  const [isOtpUnlocked, setIsOtpUnlocked] = useState(() => {
+    try {
+      return sessionStorage.getItem('godigly_admin_otp_verified') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const isAuthorized = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
+
+  if (!isAuthorized || !isOtpUnlocked) {
+    return (
+      <AdminOtpLock
+        onUnlockSuccess={() => {
+          setIsOtpUnlocked(true);
+        }}
+      />
+    );
+  }
+
+  return (
+    <AdminPanelContent
+      onLock={() => {
+        sessionStorage.removeItem('godigly_admin_otp_verified');
+        setIsOtpUnlocked(false);
+      }}
+    />
+  );
+};
+

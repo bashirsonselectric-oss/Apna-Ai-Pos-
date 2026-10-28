@@ -1,6 +1,6 @@
 node_modules/
 build/
-dist/
+# dist/ is included so GitHub Pages can serve pre-built assets
 coverage/
 .DS_Store
 *.log

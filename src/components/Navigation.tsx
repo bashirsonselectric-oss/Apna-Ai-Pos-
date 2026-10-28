@@ -391,16 +391,20 @@ export const Navigation: React.FC<NavigationProps> = ({
       ],
     },
     {
-      title: 'System & Admin',
+      title: isMasterAdmin ? 'System & Admin' : 'System & Settings',
       items: [
-        {
-          id: 'admin',
-          label: 'Admin Panel',
-          sublabel: isMasterAdmin ? 'Authorized' : 'Restricted',
-          icon: isMasterAdmin ? ShieldCheck : Lock,
-          badge: isMasterAdmin ? 'Admin' : 'Locked',
-          badgeColor: isMasterAdmin ? 'bg-amber-400 text-slate-900 font-black' : 'bg-slate-400 text-white',
-        },
+        ...(isMasterAdmin
+          ? [
+              {
+                id: 'admin' as ActiveTab,
+                label: 'Admin Control Center',
+                sublabel: 'Email OTP Protected',
+                icon: ShieldCheck,
+                badge: 'Super Admin',
+                badgeColor: 'bg-purple-600 text-white font-black',
+              },
+            ]
+          : []),
         {
           id: 'settings',
           label: 'Settings',
@@ -414,18 +418,22 @@ export const Navigation: React.FC<NavigationProps> = ({
   ];
 
   // User account & RBAC Filter:
-  // If user is not an admin, completely hide 'admin' (Admin Panel) and 'staff_roles'
+  // Admin Panel is strictly HIDDEN on all user accounts, only accessible by bashirsonselectric@gmail.com
   const visibleSections = navSections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => {
-        if (!isUserAdmin && (item.id === 'admin' || item.id === 'staff_roles')) {
+        if (item.id === 'admin' && !isMasterAdmin) {
+          return false;
+        }
+        if (!isUserAdmin && item.id === 'staff_roles') {
           return false;
         }
         return isTabAllowedForRole(item.id);
       }),
     }))
     .filter((section) => section.items.length > 0);
+
 
   // Auto-expand the dropdown section that contains the currently active tab
   React.useEffect(() => {

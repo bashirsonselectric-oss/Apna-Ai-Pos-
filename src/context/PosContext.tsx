@@ -89,9 +89,11 @@ interface PosContextType {
 
   // Products & Active Vertical
   products: Product[];
+  setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   filteredProducts: Product[];
   activeVertical: BusinessVertical;
   setActiveVertical: (vertical: BusinessVertical) => void;
+
 
   // Store Profile & Payment Gateway Settings
   storeProfile: StoreProfile;
@@ -1061,6 +1063,9 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const effectiveRole: StaffRole = simulatedRole || userSession.role || 'admin';
 
   const isTabAllowedForRole = (tabId: string): boolean => {
+    if (tabId === 'admin') {
+      return userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
+    }
     if (effectiveRole === 'admin') return true;
     const config = rolePermissions[effectiveRole];
     if (!config) return true;
@@ -1118,9 +1123,10 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const saasThemes = SAAS_THEME_PRESETS;
   const [activeThemeId, setActiveThemeId] = useState<string>(() => {
     try {
-      return localStorage.getItem('apna_pos_active_theme') || 'theme-emerald';
+      const saved = localStorage.getItem('apna_pos_active_theme');
+      return saved && saved !== 'theme-emerald' ? saved : 'theme-cryptoin-purple';
     } catch {
-      return 'theme-emerald';
+      return 'theme-cryptoin-purple';
     }
   });
 
@@ -3300,9 +3306,11 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         theme,
         toggleTheme,
         products,
+        setProducts,
         filteredProducts,
         activeVertical,
         setActiveVertical,
+
         storeProfile,
         updateStoreProfile,
         updateBusinessLogo,

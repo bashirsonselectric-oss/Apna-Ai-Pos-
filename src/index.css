@@ -224,7 +224,18 @@ input[class*="bg-slate-50"]::placeholder,
 /* ========================================================================== */
 /* DYNAMIC SAAS THEMES ENGINE (Real-time Full UI Transformation)              */
 /* ========================================================================== */
-:root, [data-pos-theme="theme-emerald"] {
+:root, [data-pos-theme="theme-cryptoin-purple"] {
+  --theme-primary: #9333ea;
+  --theme-primary-hover: #7e22ce;
+  --theme-accent: #a855f7;
+  --theme-sidebar-bg: #0e0f17;
+  --theme-active-pill: #9333ea;
+  --theme-border: rgba(147, 51, 234, 0.45);
+  --theme-glow: 0 0 25px rgba(147, 51, 234, 0.45);
+  --theme-card-header: linear-gradient(135deg, #9333ea, #6b21a8);
+}
+
+[data-pos-theme="theme-emerald"] {
   --theme-primary: #059669;
   --theme-primary-hover: #047857;
   --theme-accent: #10b981;

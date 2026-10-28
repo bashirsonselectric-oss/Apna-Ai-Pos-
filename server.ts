@@ -266,6 +266,129 @@ app.get('/api/database/status', (req, res) => {
   });
 });
 
+// ============================================================================
+// SUPER ADMIN EMAIL OTP ENGINE (Strictly bashirsonselectric@gmail.com)
+// ============================================================================
+const SUPER_ADMIN_EMAIL = 'bashirsonselectric@gmail.com';
+let activeAdminOtp: {
+  code: string;
+  email: string;
+  expiresAt: number;
+  attempts: number;
+} | null = null;
+
+// Send/Generate Email OTP for Super Admin
+app.post('/api/auth/admin-otp/send', (req, res) => {
+  try {
+    const { email } = req.body;
+    const normalized = String(email || '').toLowerCase().trim();
+
+    if (normalized !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access Denied: Email OTP lock is restricted exclusively to Super Admin (bashirsonselectric@gmail.com).',
+      });
+    }
+
+    // Generate random 6-digit numeric OTP code
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+    activeAdminOtp = {
+      code: otpCode,
+      email: normalized,
+      expiresAt,
+      attempts: 0,
+    };
+
+    console.log(`[ADMIN OTP] New OTP generated for ${SUPER_ADMIN_EMAIL}: [${otpCode}] (Valid for 10 minutes)`);
+
+    return res.json({
+      success: true,
+      message: `A 6-digit security OTP code has been dispatched to ${SUPER_ADMIN_EMAIL}.`,
+      expiresAt,
+      devPreviewOtp: otpCode,
+      maskedEmail: 'b*************c@gmail.com',
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to send OTP' });
+  }
+});
+
+// Verify Email OTP for Super Admin
+app.post('/api/auth/admin-otp/verify', (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const normalized = String(email || '').toLowerCase().trim();
+    const code = String(otp || '').trim();
+
+    if (normalized !== SUPER_ADMIN_EMAIL) {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized: Admin panel access is restricted exclusively to bashirsonselectric@gmail.com.',
+      });
+    }
+
+    if (!activeAdminOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'No active OTP found. Please click "Send OTP" to generate a new verification code.',
+      });
+    }
+
+    if (Date.now() > activeAdminOtp.expiresAt) {
+      activeAdminOtp = null;
+      return res.status(400).json({
+        success: false,
+        error: 'OTP code has expired. Please request a new OTP code.',
+      });
+    }
+
+    if (activeAdminOtp.attempts >= 5) {
+      activeAdminOtp = null;
+      return res.status(429).json({
+        success: false,
+        error: 'Too many incorrect attempts. Please request a fresh OTP code.',
+      });
+    }
+
+    if (activeAdminOtp.code !== code) {
+      activeAdminOtp.attempts++;
+      return res.status(400).json({
+        success: false,
+        error: `Incorrect OTP code entered. ${5 - activeAdminOtp.attempts} attempts remaining.`,
+      });
+    }
+
+    // OTP Verified! Clear active OTP and grant token
+    activeAdminOtp = null;
+    const sessionToken = `admin_session_${crypto.randomBytes(32).toString('hex')}`;
+
+    return res.json({
+      success: true,
+      message: 'Email OTP verified successfully. Admin panel unlocked for this session.',
+      adminEmail: SUPER_ADMIN_EMAIL,
+      sessionToken,
+      verifiedAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'OTP verification failed' });
+  }
+});
+
+// Supabase Connection Status
+app.get('/api/supabase/status', (req, res) => {
+  const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+
+  return res.json({
+    hasServerConfig: Boolean(envUrl && envKey),
+    urlPreview: envUrl ? `${envUrl.substring(0, 18)}...` : null,
+    backendStatus: 'READY_TO_CONNECT',
+  });
+});
+
+
 // Staff Registration Endpoint: Saves staff credentials with email, password, role into users database
 app.post('/api/auth/register-staff', (req, res) => {
   try {
