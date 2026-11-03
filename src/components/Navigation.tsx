@@ -69,6 +69,7 @@ export type ActiveTab =
   | 'staff_roles'
   | 'suppliers'
   | 'analytics'
+  | 'branches'
   | 'bill_templates'
   | 'theme_library'
   | 'admin'
@@ -311,6 +312,14 @@ export const Navigation: React.FC<NavigationProps> = ({
           badge: paymentRecords.length > 0 ? `${paymentRecords.length}` : null,
           badgeColor: 'bg-cyan-600 text-white',
         },
+        {
+          id: 'branches',
+          label: 'Branch Khatta & Stock',
+          sublabel: 'Transfers & AI Invoicing',
+          icon: Building2,
+          badge: 'Multi-Branch',
+          badgeColor: 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black',
+        },
       ],
     },
     {
@@ -391,20 +400,8 @@ export const Navigation: React.FC<NavigationProps> = ({
       ],
     },
     {
-      title: isMasterAdmin ? 'System & Admin' : 'System & Settings',
+      title: 'System & Settings',
       items: [
-        ...(isMasterAdmin
-          ? [
-              {
-                id: 'admin' as ActiveTab,
-                label: 'Admin Control Center',
-                sublabel: 'Email OTP Protected',
-                icon: ShieldCheck,
-                badge: 'Super Admin',
-                badgeColor: 'bg-purple-600 text-white font-black',
-              },
-            ]
-          : []),
         {
           id: 'settings',
           label: 'Settings',

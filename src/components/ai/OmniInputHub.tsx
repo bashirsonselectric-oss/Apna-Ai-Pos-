@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { usePos } from '../../context/PosContext';
+import { Product } from '../../types';
 import {
   FileText,
   Camera,
@@ -46,6 +47,7 @@ export const OmniInputHub: React.FC = () => {
     products,
     sales,
     storeProfile,
+    addToCart,
   } = usePos();
 
   const [activeTab, setActiveTab] = useState<AiHubTab>('bill_scanner');
@@ -111,9 +113,11 @@ export const OmniInputHub: React.FC = () => {
 
   // Run Bill Parsing
   const handleScanBill = async () => {
-    if (!billImageBase64 && !billRawText.trim()) {
-      setErrorMsg('Please select a preset demo bill, paste text, or upload a photo.');
-      return;
+    let currentText = billRawText.trim();
+    if (!billImageBase64 && !currentText) {
+      currentText = DEMO_PRESET_BILLS[0]?.text || 'Invoice #INV-9821\nSupplier: Pakistan Electric Wholesale';
+      setBillRawText(currentText);
+      setSelectedDemoBill(DEMO_PRESET_BILLS[0]?.id || 'demo-1');
     }
 
     setLoading(true);
@@ -123,7 +127,7 @@ export const OmniInputHub: React.FC = () => {
     try {
       const data = await parseBillWithAI({
         imageBase64: billImageBase64 || undefined,
-        billText: billRawText.trim() || undefined,
+        billText: currentText || undefined,
         businessVertical: VERTICALS_CONFIG[activeVertical].name,
       });
       setExtractedBill(data);
@@ -200,9 +204,10 @@ export const OmniInputHub: React.FC = () => {
 
   // Run CSV / Rate List Parser
   const handleParseRateList = async () => {
-    if (!csvContent.trim() && !rateListImageBase64) {
-      setErrorMsg('Please paste rate list text, upload a CSV/text file, or upload a photo of the rate list sheet.');
-      return;
+    let content = csvContent.trim();
+    if (!content && !rateListImageBase64) {
+      content = DEMO_MESSY_RATE_LIST;
+      setCsvContent(content);
     }
 
     setLoading(true);
@@ -211,7 +216,7 @@ export const OmniInputHub: React.FC = () => {
 
     try {
       const data = await parseRateListWithAI({
-        rawContent: csvContent.trim() || undefined,
+        rawContent: content || undefined,
         imageBase64: rateListImageBase64 || undefined,
         businessVertical: VERTICALS_CONFIG[activeVertical].name,
         autoExpireDays: autoExpireDays > 0 ? autoExpireDays : undefined,
@@ -638,22 +643,62 @@ export const OmniInputHub: React.FC = () => {
                   )}
 
                   {/* Actions */}
-                  <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
+                  <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
                     <button
                       type="button"
                       onClick={() => setExtractedBill(null)}
-                      className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                      className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
                     >
                       Discard
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleCommitBill}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-700/20 flex items-center space-x-1.5"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>Commit to Inventory & Update Ledger</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          let count = 0;
+                          extractedBill.items.forEach((item) => {
+                            const existing = products.find(
+                              (p) =>
+                                p.name.toLowerCase() === item.name.toLowerCase() ||
+                                (item.skuOrBarcode && p.barcode === item.skuOrBarcode)
+                            );
+                            const prodToLoad: Product = existing || {
+                              id: `prod-scan-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                              name: item.name,
+                              category: item.category || 'Scanned Bill Goods',
+                              vertical: activeVertical,
+                              costPrice: item.costPrice || 0,
+                              retailPrice: item.retailPrice || Math.round((item.costPrice || 100) * 1.25),
+                              stockQuantity: Math.max(10, (item.quantity || 1) * 2),
+                              minStockAlert: 2,
+                              unit: item.unit || 'pcs',
+                              taxPercent: item.taxPercent || 0,
+                              barcode: item.skuOrBarcode || `896${Math.floor(100000000 + Math.random() * 900000000)}`,
+                              verticalAttributes: {},
+                              lastUpdated: new Date().toISOString(),
+                            };
+                            addToCart(prodToLoad, item.quantity || 1);
+                            count += item.quantity || 1;
+                          });
+                          setSuccessMsg(`Added ${count} items from bill directly into POS Counter Cart! Press F2 to checkout.`);
+                          sounds.playCheckoutChime();
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-700/20 flex items-center space-x-1.5 cursor-pointer"
+                        title="Add these scanned bill items into active POS terminal cart"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>Send to POS Cart (کارٹ میں شامل کریں)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCommitBill}
+                        className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-700/20 flex items-center space-x-1.5 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Commit to Stock & Ledger</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (

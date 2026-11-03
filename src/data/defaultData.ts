@@ -777,7 +777,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     minStockAlert: 5,
     unit: 'coil',
     taxPercent: 0,
-    // Exact features requested: Image, Color, Size, Dual Pack (Coil) + Loose Meter breakdown
+    // Exact features requested: Image, Color, Size, Dual Pack (Coil) + Loose Meter breakdown, 7-color set
     image: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=400',
     color: 'Red',
     size: '3/29',
@@ -787,6 +787,20 @@ export const INITIAL_PRODUCTS: Product[] = [
     looseUnit: 'meter',
     looseQuantity: 305,
     loosePrice: 70,
+    options: {
+      colors: ['Red', 'Black', 'Blue', 'Yellow', 'Green', 'White', 'Grey'],
+      sizes: ['3/29', '7/29', '7/36', '3/0.029'],
+    },
+    // 7-color wire set with stock and out-of-stock indicators
+    colorVariants: [
+      { color: 'Red', hex: '#ef4444', stock: 18, inStock: true },
+      { color: 'Black', hex: '#0f172a', stock: 12, inStock: true },
+      { color: 'Blue', hex: '#2563eb', stock: 8, inStock: true },
+      { color: 'Yellow', hex: '#eab308', stock: 5, inStock: true },
+      { color: 'Green', hex: '#16a34a', stock: 4, inStock: true },
+      { color: 'White', hex: '#f8fafc', stock: 0, inStock: false }, // Out of stock
+      { color: 'Grey', hex: '#94a3b8', stock: 0, inStock: false }, // Out of stock
+    ],
     verticalAttributes: {
       brand: 'GM Cables (99.9% Pure Copper)',
       specs: '3/29 Single Core PVC Insulated (90 Meter Coil)',
@@ -797,7 +811,7 @@ export const INITIAL_PRODUCTS: Product[] = [
       looseUnit: 'meter',
       looseMeters: 305,
       meterPrice: 70,
-      displaySummary: 'Gm Cable 3/29  18 coil, 6300 per coil color red loss 305 meter 70 per meter',
+      displaySummary: 'Gm Cable 3/29  18 coil, 6300 per coil color red loss 305 meter 70 per meter (7-Color Set)',
     },
     lastUpdated: '2026-10-25',
   },
@@ -1125,45 +1139,84 @@ export const INITIAL_PRODUCTS: Product[] = [
     lastUpdated: '2026-10-21',
   },
 
-  // 5. Clothing & Apparel
+  // 5. Clothing & Apparel (Garments, Fabrics & Multi-Color Sets)
   {
     id: 'clo-1',
-    name: 'Men Premium Wash & Wear Unstitched Suit (4.5m Fabric)',
-    urduName: 'مردانہ واش اینڈ ویئر سوٹ کٹ پیس',
+    name: 'Men Premium Wash & Wear Unstitched Suit (4.5m Fabric 1-Set 8 Colors)',
+    urduName: 'مردانہ واش اینڈ ویئر سوٹ فیبرک 1 سیٹ (8 مختلف رنگ، 4.5 میٹر)',
     barcode: '896500500501',
     category: 'Unstitched Fabric',
     vertical: 'clothing_apparel',
     costPrice: 2100,
     retailPrice: 3200,
-    stockQuantity: 22,
+    stockQuantity: 28,
     minStockAlert: 5,
     unit: 'suit',
     taxPercent: 0,
+    image: 'https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?auto=format&fit=crop&q=80&w=600',
+    color: 'Slate Grey',
+    size: '4.5 Meter (Suit)',
+    options: {
+      colors: ['Navy Blue', 'Slate Grey', 'Jet Black', 'Off White', 'Camel Brown', 'Olive Green', 'Maroon', 'Charcoal'],
+      sizes: ['4.5 Meter (Suit)', '4.0 Meter', '7.0 Meter (Double Suit)'],
+    },
+    // 8-color set with stock levels & out-of-stock highlights
+    colorVariants: [
+      { color: 'Navy Blue', hex: '#1e3a8a', stock: 8, inStock: true },
+      { color: 'Slate Grey', hex: '#64748b', stock: 6, inStock: true },
+      { color: 'Jet Black', hex: '#09090b', stock: 5, inStock: true },
+      { color: 'Off White', hex: '#f8fafc', stock: 4, inStock: true },
+      { color: 'Camel Brown', hex: '#b45309', stock: 3, inStock: true },
+      { color: 'Olive Green', hex: '#3f6212', stock: 2, inStock: true },
+      { color: 'Maroon', hex: '#881337', stock: 0, inStock: false }, // Out of stock highlight
+      { color: 'Charcoal', hex: '#334155', stock: 0, inStock: false }, // Out of stock highlight
+    ],
     verticalAttributes: {
-      size: 'Unstitched (Suit)',
+      size: '4.5 Meter (Suit)',
       color: 'Slate Grey',
       fabric: 'Wrinkle-Free Blended Poly-Viscose',
+      setInfo: '1 Set includes 8 curated shades',
       rackLocation: 'Section A - Fabric Row 3',
     },
     lastUpdated: '2026-10-20',
   },
   {
     id: 'clo-2',
-    name: 'Cotton Casual Slim Fit Polo Shirt (Navy Blue)',
-    urduName: 'کاٹن پولو شرٹ نیوی بلیو',
+    name: 'Cotton Casual Slim Fit Polo Shirt (1-Set 9 Colors)',
+    urduName: 'کاٹن پولو شرٹ ریڈی میڈ (1 سیٹ 9 کلرز، تمام سائز دستیاب)',
     barcode: '896500500502',
     category: 'Ready to Wear',
     vertical: 'clothing_apparel',
     costPrice: 850,
     retailPrice: 1450,
-    stockQuantity: 36,
+    stockQuantity: 42,
     minStockAlert: 8,
     unit: 'pcs',
     taxPercent: 0,
+    image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&q=80&w=600',
+    color: 'Navy Blue',
+    size: 'L',
+    options: {
+      colors: ['Navy Blue', 'Jet Black', 'Crisp White', 'Ruby Red', 'Emerald Green', 'Royal Blue', 'Heather Grey', 'Mustard Yellow', 'Burgundy'],
+      sizes: ['S', 'M', 'L', 'XL', 'XXL'],
+    },
+    // 9-color garment set with stock status & highlights
+    colorVariants: [
+      { color: 'Navy Blue', hex: '#1e3a8a', stock: 12, inStock: true },
+      { color: 'Jet Black', hex: '#09090b', stock: 10, inStock: true },
+      { color: 'Crisp White', hex: '#f8fafc', stock: 8, inStock: true },
+      { color: 'Ruby Red', hex: '#dc2626', stock: 5, inStock: true },
+      { color: 'Emerald Green', hex: '#16a34a', stock: 4, inStock: true },
+      { color: 'Royal Blue', hex: '#2563eb', stock: 3, inStock: true },
+      { color: 'Heather Grey', hex: '#94a3b8', stock: 0, inStock: false }, // Out of stock
+      { color: 'Mustard Yellow', hex: '#ca8a04', stock: 0, inStock: false }, // Out of stock
+      { color: 'Burgundy', hex: '#701a75', stock: 0, inStock: false }, // Out of stock
+    ],
     verticalAttributes: {
       size: 'L',
       color: 'Navy Blue',
       fabric: '100% Combed Pique Cotton',
+      setInfo: '1 Set includes 9 solid colors (S to XXL)',
       rackLocation: 'Hanger Display Central',
     },
     lastUpdated: '2026-10-21',

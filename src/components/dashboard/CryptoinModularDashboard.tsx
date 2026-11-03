@@ -714,8 +714,53 @@ export const CryptoinModularDashboard: React.FC<CryptoinModularDashboardProps> =
             </div>
           </div>
 
+          {/* 3. "ADMIN CONTROL CENTER" CARD ON USER DASHBOARD */}
+          <div className="bg-[#171825]/90 backdrop-blur-xl rounded-3xl p-5 border border-purple-500/30 text-white shadow-2xl relative overflow-hidden space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-600/30 text-purple-300 flex items-center justify-center border border-purple-500/40">
+                  <ShieldCheck className="w-4 h-4 text-purple-300" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold text-white flex items-center gap-1.5">
+                    <span>Admin Control Center</span>
+                    <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded-full font-bold">
+                      سپر ایڈمن
+                    </span>
+                  </h4>
+                  <p className="text-[10px] text-slate-400">
+                    Only for bashirsonselectric@gmail.com
+                  </p>
+                </div>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+              }`}>
+                {userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com'
+                  ? 'Authorized'
+                  : 'OTP Locked'}
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Super Admin panel with Email OTP lock. Manage Supabase database, system limits, SaaS pricing plans, and multi-user accounts.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => onNavigate('admin')}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Open Admin Panel (سپر ایڈمن پینل)</span>
+            </button>
+          </div>
+
         </div>
       </div>
     </div>
   );
 };
+

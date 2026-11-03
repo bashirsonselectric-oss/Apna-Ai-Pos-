@@ -89,6 +89,11 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
   const [partnerArrangeProduct, setPartnerArrangeProduct] = useState<Product | null>(null);
   const [partnerTransferToast, setPartnerTransferToast] = useState<string | null>(null);
 
+  // Variant (Color & Size) Modal Selector
+  const [variantSelectorProduct, setVariantSelectorProduct] = useState<Product | null>(null);
+  const [selectedVariantColor, setSelectedVariantColor] = useState<string>('');
+  const [selectedVariantSize, setSelectedVariantSize] = useState<string>('');
+
   // Estimate Creation Modal State
   const [isEstimateModalOpen, setIsEstimateModalOpen] = useState(false);
   const [estimateCustomerName, setEstimateCustomerName] = useState('Haji Aslam Contractor');
@@ -524,26 +529,56 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
                 return (
                   <div
                     key={prod.id}
-                    onClick={() =>
-                      addToCart(prod, 1, {
-                        selectedColor: prod.color,
-                        subCategory: prod.subSize || prod.category,
-                      })
-                    }
+                    onClick={() => {
+                      if ((prod.colorVariants && prod.colorVariants.length > 0) || (prod.options?.sizes && prod.options.sizes.length > 0)) {
+                        setVariantSelectorProduct(prod);
+                        const firstInStock = prod.colorVariants?.find((c) => c.inStock !== false);
+                        setSelectedVariantColor(firstInStock ? firstInStock.color : prod.color || '');
+                        setSelectedVariantSize(prod.size || (prod.options?.sizes ? prod.options.sizes[0] : ''));
+                      } else {
+                        addToCart(prod, 1, {
+                          selectedColor: prod.color,
+                          selectedSize: prod.size,
+                          subCategory: prod.subSize || prod.category,
+                        });
+                      }
+                    }}
                     className={`bg-white rounded-2xl p-3.5 border transition-all flex flex-col justify-between cursor-pointer select-none group ${
                       isOutOfStock
                         ? 'border-amber-300 bg-amber-50/30 hover:border-amber-500 hover:shadow-md'
-                        : 'border-slate-200/90 hover:border-emerald-500 hover:shadow-md hover:-translate-y-0.5'
+                        : 'border-slate-200/90 hover:border-purple-500 hover:shadow-md hover:-translate-y-0.5'
                     }`}
                   >
                     <div>
-                      {/* Top Badges */}
-                      <div className="flex items-center justify-between text-[10px] mb-1.5">
-                        <span className="font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wider truncate max-w-[90px]">
-                          {prod.category}
-                        </span>
+                      {/* Top Badges & Thumbnail */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {prod.image && (
+                            <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden shrink-0 shadow-2xs">
+                              <img
+                                src={prod.image}
+                                alt={prod.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <span className="font-semibold text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wider truncate block max-w-[100px]">
+                              {prod.category}
+                            </span>
+                            {prod.size && (
+                              <span className="text-[10px] text-purple-700 font-bold block truncate mt-0.5">
+                                Size: {prod.size}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
                         <span
-                          className={`font-semibold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                          className={`font-semibold text-[10px] px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ${
                             isOutOfStock
                               ? 'bg-amber-100 text-amber-800 border border-amber-300'
                               : isLowStock
@@ -556,7 +591,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
                       </div>
 
                       {/* Title */}
-                      <h4 className="font-bold text-xs text-slate-900 group-hover:text-emerald-700 leading-snug line-clamp-2">
+                      <h4 className="font-bold text-xs text-slate-900 group-hover:text-purple-700 leading-snug line-clamp-2">
                         {prod.name}
                       </h4>
                       {prod.urduName && (
@@ -565,39 +600,92 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
                         </p>
                       )}
 
-                      {/* Color & Sub-Category / Sub-size Tags */}
-                      <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                        {prod.color && (
-                          <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold border border-slate-200">
-                            <span
-                              className="w-2 h-2 rounded-full border border-black/20"
-                              style={{
-                                backgroundColor:
-                                  prod.color.toLowerCase() === 'red'
-                                    ? '#ef4444'
-                                    : prod.color.toLowerCase() === 'black'
-                                    ? '#0f172a'
-                                    : prod.color.toLowerCase() === 'blue'
-                                    ? '#2563eb'
-                                    : prod.color.toLowerCase() === 'yellow'
-                                    ? '#eab308'
-                                    : prod.color.toLowerCase() === 'green'
-                                    ? '#16a34a'
-                                    : prod.color.toLowerCase() === 'copper'
-                                    ? '#b45309'
-                                    : '#94a3b8',
-                              }}
-                            />
-                            {prod.color}
-                          </span>
-                        )}
-                        {(prod.subSize || prod.size) && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 truncate max-w-[120px]">
-                            {prod.size ? `${prod.size} ` : ''}
-                            {prod.subSize || ''}
-                          </span>
-                        )}
-                      </div>
+                      {/* 1-Set Multi-Color Bundle Preview & Out of Stock Highlights */}
+                      {prod.colorVariants && prod.colorVariants.length > 0 ? (
+                        <div className="mt-2 pt-1.5 border-t border-slate-100">
+                          <div className="flex items-center justify-between text-[9px] mb-1">
+                            <span className="font-extrabold text-slate-600 flex items-center gap-1">
+                              <Palette className="w-2.5 h-2.5 text-purple-600" />
+                              <span>1 Set ({prod.colorVariants.length} Colors)</span>
+                            </span>
+                            <span className="text-purple-600 font-bold">Pick Color</span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1">
+                            {prod.colorVariants.map((cv, idx) => {
+                              const isCvOut = cv.inStock === false || cv.stock <= 0;
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    addToCart(prod, 1, {
+                                      selectedColor: cv.color,
+                                      selectedSize: prod.size,
+                                      subCategory: prod.subSize || prod.category,
+                                    });
+                                  }}
+                                  title={`${cv.color}: ${isCvOut ? 'OUT OF STOCK' : `${cv.stock} available`}`}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition-all cursor-pointer ${
+                                    isCvOut
+                                      ? 'bg-rose-50 text-rose-700 border-rose-300/80 line-through opacity-75 hover:opacity-100'
+                                      : 'bg-slate-50 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200 hover:border-purple-300'
+                                  }`}
+                                >
+                                  <span
+                                    className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                    style={{ backgroundColor: cv.hex || '#64748b' }}
+                                  />
+                                  <span>{cv.color}</span>
+                                  {isCvOut ? (
+                                    <span className="text-[8px] bg-rose-600 text-white px-1 py-0 rounded font-black no-underline">
+                                      0
+                                    </span>
+                                  ) : (
+                                    <span className="text-[8px] text-slate-400 font-mono-numbers">
+                                      {cv.stock}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          {prod.color && (
+                            <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                              <span
+                                className="w-2 h-2 rounded-full border border-black/20"
+                                style={{
+                                  backgroundColor:
+                                    prod.color.toLowerCase() === 'red'
+                                      ? '#ef4444'
+                                      : prod.color.toLowerCase() === 'black'
+                                      ? '#0f172a'
+                                      : prod.color.toLowerCase() === 'blue'
+                                      ? '#2563eb'
+                                      : prod.color.toLowerCase() === 'yellow'
+                                      ? '#eab308'
+                                      : prod.color.toLowerCase() === 'green'
+                                      ? '#16a34a'
+                                      : prod.color.toLowerCase() === 'copper'
+                                      ? '#b45309'
+                                      : '#94a3b8',
+                                }}
+                              />
+                              {prod.color}
+                            </span>
+                          )}
+                          {(prod.subSize || prod.size) && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 truncate max-w-[120px]">
+                              {prod.size ? `${prod.size} ` : ''}
+                              {prod.subSize || ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* 0-Stock Notice & Other Shop Locator */}
                       {isOutOfStock && (
@@ -700,35 +788,40 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
                         )}
                       </div>
 
-                      {/* Color & Sub-category line */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                        {displayColor && (
-                          <span className="inline-flex items-center gap-1 text-[9px] text-slate-600 font-semibold bg-slate-100 px-1.5 py-0.2 rounded">
-                            <span
-                              className="w-1.5 h-1.5 rounded-full"
-                              style={{
-                                backgroundColor:
-                                  displayColor.toLowerCase() === 'red'
-                                    ? '#ef4444'
-                                    : displayColor.toLowerCase() === 'black'
-                                    ? '#0f172a'
-                                    : displayColor.toLowerCase() === 'blue'
-                                    ? '#2563eb'
-                                    : '#b45309',
-                              }}
-                            />
-                            {displayColor}
+                        {/* Color & Size & Sub-category line */}
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          {displayColor && (
+                            <span className="inline-flex items-center gap-1 text-[9px] text-slate-700 font-semibold bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{
+                                  backgroundColor:
+                                    displayColor.toLowerCase() === 'red'
+                                      ? '#ef4444'
+                                      : displayColor.toLowerCase() === 'black'
+                                      ? '#0f172a'
+                                      : displayColor.toLowerCase() === 'blue'
+                                      ? '#2563eb'
+                                      : '#b45309',
+                                }}
+                              />
+                              {displayColor}
+                            </span>
+                          )}
+                          {(item.selectedSize || item.product.size) && (
+                            <span className="text-[9px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.2 rounded border border-purple-200">
+                              Size: {item.selectedSize || item.product.size}
+                            </span>
+                          )}
+                          {displaySub && (
+                            <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
+                              {displaySub}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-mono-numbers">
+                            {storeProfile.currency} {item.unitPrice} / {item.product.unit}
                           </span>
-                        )}
-                        {displaySub && (
-                          <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200">
-                            {displaySub}
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-mono-numbers">
-                          {storeProfile.currency} {item.unitPrice} / {item.product.unit}
-                        </span>
-                      </div>
+                        </div>
                     </div>
 
                     {/* Quantity Stepper */}
@@ -1299,6 +1392,191 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({ onOpenCheckout, onOpen
                 className="px-4 py-1.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Variant (Color & Size) Selector Modal */}
+      {variantSelectorProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-purple-500/30 overflow-hidden">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-600/30 text-purple-400 flex items-center justify-center">
+                  <Palette className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold truncate max-w-[260px]">{variantSelectorProduct.name}</h3>
+                  <p className="text-[11px] text-purple-300">Select Garment Size & 1-Set Color</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setVariantSelectorProduct(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Product Thumbnail & Price preview */}
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                {variantSelectorProduct.image ? (
+                  <img
+                    src={variantSelectorProduct.image}
+                    alt={variantSelectorProduct.name}
+                    className="w-14 h-14 rounded-xl object-cover border border-slate-300 shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-xs shrink-0">
+                    POS
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-xs font-bold text-slate-900 truncate">{variantSelectorProduct.name}</h4>
+                  <div className="text-sm font-extrabold text-purple-700 font-mono-numbers mt-0.5">
+                    {storeProfile.currency} {variantSelectorProduct.retailPrice.toLocaleString()} / {variantSelectorProduct.unit}
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Category: {variantSelectorProduct.category}
+                  </span>
+                </div>
+              </div>
+
+              {/* Garment / Fabric Size Options */}
+              {variantSelectorProduct.options?.sizes && variantSelectorProduct.options.sizes.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700">Select Size / Cut Length:</label>
+                    <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                      Active: {selectedVariantSize || 'None'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {variantSelectorProduct.options.sizes.map((sz) => (
+                      <button
+                        key={sz}
+                        type="button"
+                        onClick={() => setSelectedVariantSize(sz)}
+                        className={`text-xs px-3 py-1.5 rounded-xl font-bold border transition-all cursor-pointer ${
+                          selectedVariantSize === sz
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        {sz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 1-Set Colors & Out-of-Stock Design Highlights */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Choose Color ({variantSelectorProduct.colorVariants?.length || 0} Colors in Set):</span>
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    Red badge = Out of stock design
+                  </span>
+                </div>
+
+                {variantSelectorProduct.colorVariants && variantSelectorProduct.colorVariants.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {variantSelectorProduct.colorVariants.map((cv) => {
+                      const isCvOut = cv.inStock === false || cv.stock <= 0;
+                      const isSelected = selectedVariantColor.toLowerCase() === cv.color.toLowerCase();
+
+                      return (
+                        <button
+                          key={cv.color}
+                          type="button"
+                          onClick={() => setSelectedVariantColor(cv.color)}
+                          className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                            isSelected
+                              ? 'ring-2 ring-purple-600 border-purple-500 bg-purple-50/50 shadow-sm'
+                              : isCvOut
+                              ? 'border-rose-300/80 bg-rose-50/60 opacity-80 hover:opacity-100'
+                              : 'border-slate-200 hover:border-purple-300 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className="w-4 h-4 rounded-full border border-black/20 shrink-0 shadow-2xs"
+                              style={{ backgroundColor: cv.hex || '#64748b' }}
+                            />
+                            <div className="min-w-0">
+                              <span className={`text-xs font-bold block truncate ${isCvOut ? 'line-through text-rose-800' : 'text-slate-900'}`}>
+                                {cv.color}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono-numbers">
+                                {isCvOut ? '0 left' : `${cv.stock} in stock`}
+                              </span>
+                            </div>
+                          </div>
+
+                          {isCvOut ? (
+                            <span className="text-[9px] bg-rose-600 text-white px-1.5 py-0.5 rounded-md font-extrabold shrink-0 shadow-2xs">
+                              Out of Stock
+                            </span>
+                          ) : isSelected ? (
+                            <Check className="w-4 h-4 text-purple-600 shrink-0" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {['Red', 'Black', 'Blue', 'White', 'Yellow', 'Green', 'Grey'].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setSelectedVariantColor(c)}
+                        className={`text-xs px-3 py-1.5 rounded-xl border font-bold ${
+                          selectedVariantColor === c
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-white border-slate-300 text-slate-700'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setVariantSelectorProduct(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  addToCart(variantSelectorProduct, 1, {
+                    selectedColor: selectedVariantColor || variantSelectorProduct.color,
+                    selectedSize: selectedVariantSize || variantSelectorProduct.size,
+                    subCategory: variantSelectorProduct.subSize || variantSelectorProduct.category,
+                  });
+                  setVariantSelectorProduct(null);
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-linear-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white font-bold text-xs shadow-md shadow-purple-600/30 flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Selected Color & Size to Bill</span>
               </button>
             </div>
           </div>

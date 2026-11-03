@@ -617,6 +617,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             )}
           </div>
         </div>
+
+        {/* Super Admin Access Banner on User Dashboard */}
+        <div className="bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900 p-5 rounded-3xl border border-purple-500/40 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-purple-600/30 text-purple-300 flex items-center justify-center border border-purple-500/40 shrink-0">
+              <ShieldCheck className="w-5 h-5 text-purple-300" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-extrabold text-sm text-white">Super Admin Control Center (سپر ایڈمن پینل)</h4>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300 font-bold border border-purple-400/30">
+                  Email OTP Lock
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Protected admin access for <strong>bashirsonselectric@gmail.com</strong>. Manage Supabase database, system limits & multi-user data.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('admin')}
+            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-purple-600/40 transition-all shrink-0 cursor-pointer"
+          >
+            Open Admin Panel
+          </button>
+        </div>
       </div>
         </>
       )}

@@ -28,7 +28,17 @@ interface UserProfileModalProps {
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onClose }) => {
-  const { userSession, setUserSession, googleSignIn, googleSignOut, storeProfile, updateStoreProfile, changeUserPassword } = usePos();
+  const {
+    userSession,
+    setUserSession,
+    googleSignIn,
+    googleSignOut,
+    storeProfile,
+    updateStoreProfile,
+    changeUserPassword,
+    staffAccounts,
+    switchActiveUserAccount,
+  } = usePos();
   const [isEditing, setIsEditing] = useState(false);
   const [nameInput, setNameInput] = useState(userSession.displayName ?? '');
   const [emailInput, setEmailInput] = useState(userSession.email ?? '');
@@ -257,102 +267,102 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
           {/* Account Switcher Options */}
           {!isEditing ? (
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                Quick Switch Account:
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Saved Multi-User Accounts ({staffAccounts.length}):
+                </span>
+                <span className="text-[10px] text-purple-600 font-bold">1-Click Switch</span>
               </div>
-              <button
-                type="button"
-                onClick={handleSignInAsBashir}
-                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between text-xs transition-all ${
-                  userSession.email === 'bashirsonselectric@gmail.com'
-                    ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-bold shadow-2xs'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                }`}
-              >
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
-                    B
-                  </div>
-                  <div>
-                    <div className="font-bold">Muhammad Bashir (Owner Admin)</div>
-                    <div className="text-[11px] text-slate-500">bashirsonselectric@gmail.com</div>
-                  </div>
-                </div>
-                {userSession.email === 'bashirsonselectric@gmail.com' && (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                )}
-              </button>
 
-              <button
-                type="button"
-                onClick={handleSignInAsCashier}
-                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between text-xs transition-all ${
-                  userSession.email === 'asif.cashier@godigly.com'
-                    ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-bold shadow-2xs'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                }`}
-              >
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
-                    A
-                  </div>
-                  <div>
-                    <div className="font-bold">Asif Khan (Counter Cashier)</div>
-                    <div className="text-[11px] text-slate-500">asif.cashier@godigly.com</div>
-                  </div>
-                </div>
-                {userSession.email === 'asif.cashier@godigly.com' && (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                )}
-              </button>
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {staffAccounts.map((acc) => {
+                  const isActive = userSession.email.toLowerCase().trim() === acc.email.toLowerCase().trim();
+                  return (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={() => switchActiveUserAccount(acc.email)}
+                      className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between text-xs transition-all cursor-pointer ${
+                        isActive
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold shadow-2xs ring-1 ring-emerald-500/30'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 ${
+                            acc.role === 'admin'
+                              ? 'bg-purple-600'
+                              : acc.role === 'manager'
+                              ? 'bg-indigo-600'
+                              : 'bg-slate-700'
+                          }`}
+                        >
+                          {acc.name.charAt(0)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold truncate flex items-center gap-1.5 text-slate-900">
+                            <span>{acc.name}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-bold uppercase border border-slate-200">
+                              {acc.role}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 truncate font-mono">{acc.email}</div>
+                        </div>
+                      </div>
+                      {isActive && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
 
               <button
                 type="button"
                 onClick={() => setIsEditing(true)}
-                className="w-full py-2 text-xs text-center text-indigo-600 hover:text-indigo-800 font-semibold"
+                className="w-full py-2 text-xs text-center text-purple-700 hover:text-purple-900 font-bold cursor-pointer"
               >
-                + Sign in with custom Google Account
+                + Sign in or Add Another User Account
               </button>
             </div>
           ) : (
             <form onSubmit={handleSwitchAccount} className="space-y-3 pt-1">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Google Account Email:
+                <label className="block text-xs font-bold text-slate-900 mb-1">
+                  User Account Email:
                 </label>
                 <input
                   type="email"
                   required
                   value={emailInput ?? ''}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="name@gmail.com"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden"
+                  placeholder="name@bashirsons.com"
+                  className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 placeholder:text-slate-400 rounded-lg focus:outline-hidden font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Display Name:</label>
+                <label className="block text-xs font-bold text-slate-900 mb-1">Display Name:</label>
                 <input
                   type="text"
                   required
                   value={nameInput ?? ''}
                   onChange={(e) => setNameInput(e.target.value)}
-                  placeholder="Your Name"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden"
+                  placeholder="Staff / Cashier Name"
+                  className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 placeholder:text-slate-400 rounded-lg focus:outline-hidden font-medium"
                 />
               </div>
               <div className="flex space-x-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
-                  className="flex-1 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600"
+                  className="flex-1 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+                  className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold cursor-pointer"
                 >
-                  Sign In
+                  Sign In / Switch
                 </button>
               </div>
             </form>
@@ -571,7 +581,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                 )}
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-slate-900 mb-1">
                     Current Password:
                   </label>
                   <input
@@ -580,12 +590,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                     value={currentPassInput}
                     onChange={(e) => setCurrentPassInput(e.target.value)}
                     placeholder="Enter current password..."
-                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-slate-900 mb-1">
                     New Password:
                   </label>
                   <input
@@ -594,12 +604,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                     value={newPassInput}
                     onChange={(e) => setNewPassInput(e.target.value)}
                     placeholder="At least 6 characters..."
-                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  <label className="block text-xs font-bold text-slate-900 mb-1">
                     Confirm New Password:
                   </label>
                   <input
@@ -608,7 +618,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                     value={confirmPassInput}
                     onChange={(e) => setConfirmPassInput(e.target.value)}
                     placeholder="Re-enter new password..."
-                    className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
                   />
                 </div>
 

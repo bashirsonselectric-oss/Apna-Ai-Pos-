@@ -1,0 +1,312 @@
+// ============================================================================
+// PRISMA SCHEMA: Multi-Tenant SaaS POS & Branch Management Architecture
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  CASHIER
+  ACCOUNTANT
+}
+
+enum TransactionType {
+  SALE_INVOICE
+  PAYMENT_RECEIVED
+  EXPENSE_PAYOUT
+  SUPPLIER_PAYOUT
+  STOCK_TRANSFER_IN
+  STOCK_TRANSFER_OUT
+  INTER_BRANCH_SETTLEMENT
+  ADJUSTMENT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  PARTIALLY_PAID
+  VOID
+  REFUNDED
+}
+
+enum EstimateStatus {
+  PENDING
+  CONVERTED
+  EXPIRED
+  CANCELLED
+}
+
+enum TransferStatus {
+  PENDING
+  IN_TRANSIT
+  COMPLETED
+  REJECTED
+}
+
+// ----------------------------------------------------------------------------
+// 1. TENANT & BRANCHES
+// ----------------------------------------------------------------------------
+model Tenant {
+  id           String    @id @default(uuid())
+  businessName String
+  ownerEmail   String    @unique
+  ownerPhone   String
+  currency     String    @default("PKR")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  branches     Branch[]
+  products     Product[]
+  users        User[]
+
+  @@map("tenants")
+}
+
+model Branch {
+  id             String    @id @default(uuid())
+  tenantId       String
+  name           String    // e.g. "Main Godown", "Branch #2 Commercial Market"
+  code           String    // e.g. "BR-01", "BR-02"
+  address        String?
+  phone          String?
+  isWarehouse    Boolean   @default(false)
+  currentBalance Float     @default(0.0) // Branch Khatta running cash balance
+  totalReceivable Float    @default(0.0) // Total pending recovery
+  totalPayable   Float     @default(0.0) // Total pending liabilities
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchStocks   BranchStock[]
+  ledgerEntries  LedgerTransaction[]
+  invoices       Invoice[]
+  estimates      Estimate[]
+  transfersSent  StockTransfer[] @relation("OriginBranch")
+  transfersRecv  StockTransfer[] @relation("DestinationBranch")
+  users          User[]
+
+  @@unique([tenantId, code])
+  @@map("branches")
+}
+
+// ----------------------------------------------------------------------------
+// 2. USER ACCOUNTS & RBAC
+// ----------------------------------------------------------------------------
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String
+  branchId     String?
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(CASHIER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@map("users")
+}
+
+// ----------------------------------------------------------------------------
+// 3. MASTER CATALOG & BRANCH ISOLATED STOCK
+// ----------------------------------------------------------------------------
+model Product {
+  id           String    @id @default(uuid())
+  tenantId     String
+  name         String
+  barcode      String?   @unique
+  sku          String?
+  category     String
+  unit         String    @default("pcs")
+  costPrice    Float
+  retailPrice  Float
+  minStockAlert Int      @default(5)
+  verticalAttrs Json?    // Dynamic fields (gauge, warranty, batch)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchStocks BranchStock[]
+  invoiceItems InvoiceItem[]
+  estimateItems EstimateItem[]
+  transferItems TransferItem[]
+
+  @@map("products")
+}
+
+model BranchStock {
+  id             String    @id @default(uuid())
+  branchId       String
+  productId      String
+  quantity       Float     @default(0.0)
+  reorderLevel   Int       @default(5)
+  shelfLocation  String?
+  lastRestockedAt DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  branch         Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, productId])
+  @@map("branch_stocks")
+}
+
+// ----------------------------------------------------------------------------
+// 4. INTER-BRANCH STOCK TRANSFERS
+// ----------------------------------------------------------------------------
+model StockTransfer {
+  id             String         @id @default(uuid())
+  transferNo     String         @unique // e.g. "TRF-2026-001"
+  fromBranchId   String
+  toBranchId     String
+  status         TransferStatus @default(PENDING)
+  notes          String?
+  dispatchedAt   DateTime?
+  receivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  fromBranch     Branch         @relation("OriginBranch", fields: [fromBranchId], references: [id])
+  toBranch       Branch         @relation("DestinationBranch", fields: [toBranchId], references: [id])
+  items          TransferItem[]
+
+  @@map("stock_transfers")
+}
+
+model TransferItem {
+  id          String        @id @default(uuid())
+  transferId  String
+  productId   String
+  quantity    Float
+
+  transfer    StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product     Product       @relation(fields: [productId], references: [id])
+
+  @@map("transfer_items")
+}
+
+// ----------------------------------------------------------------------------
+// 5. BRANCH KHATTA (LEDGER TRANSACTIONS)
+// ----------------------------------------------------------------------------
+model LedgerTransaction {
+  id             String          @id @default(uuid())
+  branchId       String
+  invoiceId      String?
+  type           TransactionType
+  title          String
+  description    String?
+  amount         Float           // Transaction value
+  debit          Float           @default(0.0) // Outflow
+  credit         Float           @default(0.0) // Inflow
+  runningBalance Float           // Balance after this transaction
+  referenceNo    String?         // Check #, Payment Receipt #, Raast TRN
+  createdBy      String?
+  createdAt      DateTime        @default(now())
+
+  branch         Branch          @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  invoice        Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@map("ledger_transactions")
+}
+
+// ----------------------------------------------------------------------------
+// 6. INVOICING & ESTIMATES (QUOTATIONS)
+// ----------------------------------------------------------------------------
+model Invoice {
+  id             String         @id @default(uuid())
+  invoiceNo      String         @unique // e.g. "INV-BR01-2026-0042"
+  branchId       String
+  estimateId     String?        @unique // Linked origin estimate if converted
+  customerName   String
+  customerPhone  String?
+  customerAddress String?
+  subtotal       Float
+  discountAmount Float          @default(0.0)
+  taxAmount      Float          @default(0.0)
+  grandTotal     Float
+  paidAmount     Float          @default(0.0)
+  dueAmount      Float          @default(0.0)
+  paymentMethod  String         @default("cash") // cash, card, raast, udhar
+  status         InvoiceStatus  @default(ISSUED)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  estimate       Estimate?      @relation(fields: [estimateId], references: [id], onDelete: SetNull)
+  items          InvoiceItem[]
+  ledgerEntries  LedgerTransaction[]
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id         String    @id @default(uuid())
+  invoiceId  String
+  productId  String
+  name       String
+  quantity   Float
+  unit       String
+  unitPrice  Float
+  costPrice  Float
+  subtotal   Float
+
+  invoice    Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product    Product   @relation(fields: [productId], references: [id])
+
+  @@map("invoice_items")
+}
+
+model Estimate {
+  id             String         @id @default(uuid())
+  estimateNo     String         @unique // e.g. "EST-BR01-2026-001"
+  branchId       String
+  customerName   String
+  customerPhone  String?
+  customerAddress String?
+  subtotal       Float
+  discountAmount Float          @default(0.0)
+  taxAmount      Float          @default(0.0)
+  grandTotal     Float
+  validUntil     DateTime
+  status         EstimateStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  invoice        Invoice?       // If converted to invoice
+  items          EstimateItem[]
+
+  @@map("estimates")
+}
+
+model EstimateItem {
+  id          String    @id @default(uuid())
+  estimateId  String
+  productId   String
+  name        String
+  quantity    Float
+  unit        String
+  unitPrice   Float
+  costPrice   Float
+  subtotal    Float
+
+  estimate    Estimate  @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id])
+
+  @@map("estimate_items")
+}

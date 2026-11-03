@@ -116,7 +116,7 @@ interface PosContextType {
   
   // Cart
   cart: CartItem[];
-  addToCart: (product: Product, qty?: number, options?: { selectedColor?: string; subCategory?: string }) => void;
+  addToCart: (product: Product, qty?: number, options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }) => void;
   removeFromCart: (productId: string) => void;
   updateCartQuantity: (productId: string, qty: number) => void;
   clearCart: () => void;
@@ -256,6 +256,8 @@ interface PosContextType {
   staffAccounts: StaffAccount[];
   registerStaffAccount: (acc: Omit<StaffAccount, 'id' | 'createdAt'>) => Promise<{ success: boolean; message: string }>;
   deleteStaffAccount: (id: string) => void;
+  saveMultipleUsersData: (accounts: StaffAccount[]) => void;
+  switchActiveUserAccount: (email: string) => void;
 
   // Spend Money & Expenses with WhatsApp Sheet
   expenses: ExpenseRecord[];
@@ -686,6 +688,18 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) return JSON.parse(saved);
     } catch {}
     return [
+      {
+        id: 'super-admin-0',
+        name: 'Muhammad Bashir (Super Admin)',
+        email: 'bashirsonselectric@gmail.com',
+        password: 'admin123',
+        role: 'admin',
+        phone: '+92 300 1234567',
+        baseSalary: 150000,
+        assignedBranch: 'Main Central Office',
+        status: 'active',
+        createdAt: '2026-01-01T08:00:00.000Z',
+      },
       {
         id: 'staff-acc-1',
         name: 'Ali Raza Cashier',
@@ -1508,15 +1522,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Cart operations
-  // Cart operations with Color, Sub-Category and 0-Stock tracking
+  // Cart operations with Color, Size, Sub-Category and 0-Stock tracking
   const addToCart = (
     product: Product,
     qty: number = 1,
-    options?: { selectedColor?: string; subCategory?: string }
+    options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }
   ) => {
     sounds.playScanBeep();
     const isZeroStock = (product.stockQuantity || 0) <= 0;
     const colorToUse = options?.selectedColor || product.color || '';
+    const sizeToUse = options?.selectedSize || product.size || '';
     const subCatToUse = options?.subCategory || product.subSize || product.category || '';
 
     setCart((prev) => {
@@ -1524,6 +1539,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (item) =>
           item.product.id === product.id &&
           (item.selectedColor || '') === colorToUse &&
+          (item.selectedSize || '') === sizeToUse &&
           (item.subCategory || '') === subCatToUse
       );
       if (existing) {
@@ -1548,6 +1564,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           discount: 0,
           subtotal: qty * product.retailPrice,
           selectedColor: colorToUse,
+          selectedSize: sizeToUse,
           subCategory: subCatToUse,
           wasZeroStock: isZeroStock,
         },
@@ -1640,7 +1657,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         subtotal: c.subtotal,
         costPrice: c.product.costPrice,
         color: c.selectedColor || c.product.color,
-        size: c.product.size,
+        size: c.selectedSize || c.product.size,
         subCategory: c.subCategory || c.product.subSize,
       })),
       subtotal: cartSubtotal,
@@ -2491,6 +2508,40 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteStaffAccount = (id: string) => {
     setStaffAccounts((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const saveMultipleUsersData = (accounts: StaffAccount[]) => {
+    setStaffAccounts(accounts);
+    localStorage.setItem(`apna_pos_${activeBusinessId}_staff_accounts`, JSON.stringify(accounts));
+    localStorage.setItem('apna_pos_all_users_global', JSON.stringify(accounts));
+    sounds.playCheckoutChime();
+  };
+
+  const switchActiveUserAccount = (email: string) => {
+    const acc = staffAccounts.find((a) => a.email.toLowerCase() === email.toLowerCase());
+    if (acc) {
+      const isSuper = acc.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
+      const newSession: UserSession = {
+        email: acc.email,
+        displayName: acc.name,
+        photoURL: '',
+        role: acc.role,
+        storeId: activeBusinessId,
+        isGoogleSignedIn: false,
+        isAuthenticated: true,
+        permissions: {
+          canDiscount: acc.role === 'admin' || acc.role === 'manager' || isSuper,
+          canEditPrices: acc.role === 'admin' || isSuper,
+          canAccessAdmin: isSuper,
+          canManageStock: acc.role === 'admin' || acc.role === 'manager' || isSuper,
+          canViewProfit: acc.role === 'admin' || acc.role === 'manager' || isSuper,
+          canGiveUdhar: acc.role !== 'cashier' || isSuper,
+        },
+      };
+      setUserSession(newSession);
+      localStorage.setItem('apna_pos_auth_user', JSON.stringify(newSession));
+      sounds.playCheckoutChime();
+    }
   };
 
   const recordSalaryPayout = (payout: Omit<SalaryPayoutRecord, 'id' | 'payoutDate'>) => {
@@ -3411,6 +3462,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         staffAccounts,
         registerStaffAccount,
         deleteStaffAccount,
+        saveMultipleUsersData,
+        switchActiveUserAccount,
         expenses,
         addExpense,
         deleteExpense,

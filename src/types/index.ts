@@ -48,8 +48,8 @@ export interface Product {
   image?: string;
   // Enhanced Stock Attributes: Image, Color, Size/Gauge, Dual Unit (Pack/Coil + Loose/Meter)
   color?: string; // e.g. "Red", "Black", "Blue", "Yellow", "White"
-  size?: string; // e.g. "3/29", "7/29", "7/36", "40mm", "Size 42"
-  packUnit?: string; // e.g. "coil", "carton", "box"
+  size?: string; // e.g. "3/29", "7/29", "7/36", "40mm", "Size 42", "M", "L", "XL"
+  packUnit?: string; // e.g. "coil", "carton", "box", "set"
   packQuantity?: number; // e.g. 18
   packPrice?: number; // e.g. 6300 per coil
   looseUnit?: string; // e.g. "meter", "loose pcs"
@@ -61,6 +61,15 @@ export interface Product {
     sizes?: string[];
     subSizes?: string[];
   };
+  // Garment / Fabrics / Wire 7-9 Color Set & Stock Variants
+  colorVariants?: {
+    color: string;
+    hex?: string;
+    stock: number;
+    inStock?: boolean;
+    sku?: string;
+    image?: string;
+  }[];
   // Dynamic vertical-specific attributes
   verticalAttributes: Record<string, any>;
   lastUpdated: string;
@@ -74,6 +83,7 @@ export interface CartItem {
   subtotal: number;
   notes?: string;
   selectedColor?: string;
+  selectedSize?: string;
   subCategory?: string;
   wasZeroStock?: boolean;
 }
