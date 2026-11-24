@@ -8,7 +8,6 @@ import {
   BarChart3,
   ShieldCheck,
   Settings,
-  Lock,
   X,
   Zap,
   Layers,
@@ -21,9 +20,7 @@ import {
   RotateCcw,
   Bot,
   ChevronLeft,
-  ChevronRight,
   ChevronDown,
-  PanelLeftClose,
   PanelLeft,
   Cross,
   ShoppingCart,
@@ -45,14 +42,20 @@ import {
   FileText,
   Palette,
   ShieldAlert,
+  Activity,
+  Grid2x2,
+  Tag,
+  ClipboardList,
 } from 'lucide-react';
 import { usePos } from '../context/PosContext';
 import { VERTICALS_CONFIG } from '../data/defaultData';
-import { BusinessVertical, UserRole } from '../types';
+import { BusinessVertical } from '../types';
 
 export type ActiveTab =
   | 'dashboard'
   | 'pos'
+  | 'categories'
+  | 'promotions'
   | 'estimates'
   | 'returns'
   | 'ai_manager'
@@ -69,6 +72,7 @@ export type ActiveTab =
   | 'staff_roles'
   | 'suppliers'
   | 'analytics'
+  | 'activity_logs'
   | 'branches'
   | 'bill_templates'
   | 'theme_library'
@@ -90,10 +94,9 @@ interface NavigationProps {
 interface NavItemDef {
   id: ActiveTab;
   label: string;
-  sublabel: string;
   icon: React.ComponentType<{ className?: string }>;
-  badge?: string | null;
-  badgeColor?: string;
+  count?: number;
+  alert?: boolean;
 }
 
 interface NavSection {
@@ -108,13 +111,11 @@ export const Navigation: React.FC<NavigationProps> = ({
   setMobileMenuOpen,
   isCollapsed = false,
   onToggleCollapse,
-  onOpenPriceAdjuster,
   onOpenProfileModal,
   onOpenAuthModal,
 }) => {
   const {
     cart,
-    rateLists,
     filteredProducts,
     khatas,
     userSession,
@@ -123,14 +124,10 @@ export const Navigation: React.FC<NavigationProps> = ({
     setActiveVertical,
     storeProfile,
     outOfStockItems,
-    paymentRecords,
-    expenses,
-    staffMembers,
-    vipCustomers,
-    personKhattaProfiles,
     returns,
-    attendanceRecords,
     estimates,
+    sales,
+    coupons,
     isTabAllowedForRole,
     effectiveRole,
     simulatedRole,
@@ -140,20 +137,18 @@ export const Navigation: React.FC<NavigationProps> = ({
   const [verticalDropdownOpen, setVerticalDropdownOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
-  const activeExpiringLists = rateLists.filter((r) => r.expiresAt && !r.isExpired).length;
   const lowStockCount = filteredProducts.filter((p) => p.stockQuantity <= p.minStockAlert).length;
   const totalUdharCustomers = khatas.filter((k) => k.currentBalance > 0).length;
+  const activeCouponCount = coupons.filter((c) => c.active).length;
   const isMasterAdmin = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
   const isUserAdmin = effectiveRole === 'admin' || userSession.role === 'admin' || isMasterAdmin;
 
-  // Dropdown collapse/expand state for sidebar menu groups
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    'Operations': true,
-    'Inventory & Stock': true,
-    'Khatas & Ledgers': true,
-    'Finance & Team': true,
-    'Customization & SaaS': true,
-    'System & Admin': true,
+    Boutique: true,
+    'Catalog & Stock': true,
+    'Clients & Sales': true,
+    'Growth & Settings': true,
+    'Store Tools & Ledgers': false,
   });
 
   const toggleSection = (sectionTitle: string) => {
@@ -165,274 +160,95 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   const getVerticalIcon = (v: BusinessVertical) => {
     switch (v) {
-      case 'mobile_shop':
-        return <Smartphone className="w-3.5 h-3.5 text-blue-400" />;
-      case 'marts':
-        return <ShoppingCart className="w-3.5 h-3.5 text-emerald-400" />;
-      case 'cash_and_carry':
-        return <Store className="w-3.5 h-3.5 text-indigo-400" />;
-      case 'fast_food':
-        return <Utensils className="w-3.5 h-3.5 text-amber-500" />;
-      case 'shoes_footwear':
-        return <Footprints className="w-3.5 h-3.5 text-orange-400" />;
-      case 'gift_and_toys':
-        return <Gift className="w-3.5 h-3.5 text-pink-400" />;
-      case 'books_stationery':
-        return <BookOpen className="w-3.5 h-3.5 text-teal-400" />;
-      case 'distributor':
-        return <Truck className="w-3.5 h-3.5 text-cyan-400" />;
-      case 'farm_dairy_distributor':
-        return <Milk className="w-3.5 h-3.5 text-lime-400" />;
-      case 'digital_products':
-        return <Cpu className="w-3.5 h-3.5 text-violet-400" />;
-      case 'electrical_hardware':
-        return <Zap className="w-3.5 h-3.5 text-amber-500" />;
-      case 'medical_pharmacy':
-        return <Cross className="w-3.5 h-3.5 text-rose-500" />;
-      case 'grocery_general':
-        return <ShoppingCart className="w-3.5 h-3.5 text-emerald-500" />;
-      case 'bakery_sweets':
-        return <Cake className="w-3.5 h-3.5 text-pink-500" />;
-      case 'clothing_apparel':
-        return <Shirt className="w-3.5 h-3.5 text-purple-500" />;
-      case 'sanitary_plumbing':
-        return <Wrench className="w-3.5 h-3.5 text-cyan-500" />;
-      default:
-        return <Store className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'mobile_shop': return <Smartphone className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'marts': return <ShoppingCart className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'cash_and_carry': return <Store className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'fast_food': return <Utensils className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'shoes_footwear': return <Footprints className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'gift_and_toys': return <Gift className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'books_stationery': return <BookOpen className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'distributor': return <Truck className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'farm_dairy_distributor': return <Milk className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'digital_products': return <Cpu className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'electrical_hardware': return <Zap className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'medical_pharmacy': return <Cross className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'grocery_general': return <ShoppingCart className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'bakery_sweets': return <Cake className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'clothing_apparel': return <Shirt className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      case 'sanitary_plumbing': return <Wrench className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
+      default: return <Store className="w-3.5 h-3.5 text-[#141414] dark:text-[#E5C6C3]" />;
     }
   };
 
+  // All 13 primary Fashion Boutique POS items + preserved Store Tools
   const navSections: NavSection[] = [
     {
-      title: 'Operations',
+      title: 'Boutique',
       items: [
-        {
-          id: 'dashboard',
-          label: 'Dashboard',
-          sublabel: 'Sales & Profit',
-          icon: LayoutDashboard,
-          badge: 'Live',
-          badgeColor: 'bg-indigo-600 text-white font-bold',
-        },
-        {
-          id: 'pos',
-          label: 'POS Counter',
-          sublabel: 'Billing (F2)',
-          icon: CreditCard,
-          badge: cart.length > 0 ? `${cart.length}` : null,
-          badgeColor: 'bg-emerald-500 text-white font-bold',
-        },
-        {
-          id: 'estimates',
-          label: 'Estimates & Quotes',
-          sublabel: 'تخمینہ بل اور کوٹیشن',
-          icon: FileText,
-          badge: estimates.length > 0 ? `${estimates.length}` : null,
-          badgeColor: 'bg-indigo-600 text-white font-bold',
-        },
-        {
-          id: 'returns',
-          label: 'Returns',
-          sublabel: 'Refunds & Restock',
-          icon: RotateCcw,
-          badge: returns.length > 0 ? `${returns.length}` : null,
-          badgeColor: 'bg-rose-500 text-white',
-        },
-        {
-          id: 'ai_manager',
-          label: 'AI WhatsApp',
-          sublabel: 'Auto Manager',
-          icon: Bot,
-          badge: 'Bot',
-          badgeColor: 'bg-emerald-500 text-white font-bold',
-        },
-        {
-          id: 'ai_hub',
-          label: 'Omni-AI Hub',
-          sublabel: 'Scanner & Vision',
-          icon: Sparkles,
-          badge: activeExpiringLists > 0 ? `${activeExpiringLists} Exp` : 'AI',
-          badgeColor: 'bg-amber-500 text-slate-900 font-bold',
-        },
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'pos', label: 'POS / New Sale', icon: CreditCard, count: cart.length || undefined },
       ],
     },
     {
-      title: 'Inventory & Stock',
+      title: 'Catalog & Stock',
       items: [
-        {
-          id: 'inventory',
-          label: 'Catalog & Schema',
-          sublabel: 'Dynamic Fields',
-          icon: Package,
-          badge: lowStockCount > 0 ? `${lowStockCount}` : null,
-          badgeColor: 'bg-rose-500 text-white',
-        },
-        {
-          id: 'stock',
-          label: 'Stock & AI',
-          sublabel: 'Valuation & Alert',
-          icon: Layers,
-          badge: outOfStockItems.length > 0 ? `${outOfStockItems.length} Out` : null,
-          badgeColor: 'bg-rose-600 text-white font-bold',
-        },
+        { id: 'inventory', label: 'Products', icon: Package, count: lowStockCount || undefined, alert: lowStockCount > 0 },
+        { id: 'categories', label: 'Categories', icon: Grid2x2, count: 10 },
+        { id: 'stock', label: 'Inventory / Stock', icon: Layers, count: outOfStockItems.length || undefined, alert: outOfStockItems.length > 0 },
       ],
     },
     {
-      title: 'Khatas & Ledgers',
+      title: 'Clients & Sales',
       items: [
-        {
-          id: 'khata',
-          label: 'Udhar Khatta',
-          sublabel: 'WhatsApp Ledger',
-          icon: BookOpen,
-          badge: totalUdharCustomers > 0 ? `${totalUdharCustomers}` : null,
-          badgeColor: 'bg-indigo-600 text-white font-bold',
-        },
-        {
-          id: 'person_khatta',
-          label: 'Person Khatta',
-          sublabel: 'Contractor & Advance',
-          icon: BookUser,
-          badge: personKhattaProfiles.length > 0 ? `${personKhattaProfiles.length}` : null,
-          badgeColor: 'bg-amber-500 text-slate-900 font-bold',
-        },
-        {
-          id: 'vip_customers',
-          label: 'VIP Customers',
-          sublabel: 'Loyalty & Bills',
-          icon: Crown,
-          badge: vipCustomers.length > 0 ? `${vipCustomers.length}` : null,
-          badgeColor: 'bg-yellow-400 text-slate-900 font-bold',
-        },
-        {
-          id: 'payments',
-          label: 'Payment Records',
-          sublabel: 'Cash & Digital Ledger',
-          icon: Receipt,
-          badge: paymentRecords.length > 0 ? `${paymentRecords.length}` : null,
-          badgeColor: 'bg-cyan-600 text-white',
-        },
-        {
-          id: 'branches',
-          label: 'Branch Khatta & Stock',
-          sublabel: 'Transfers & AI Invoicing',
-          icon: Building2,
-          badge: 'Multi-Branch',
-          badgeColor: 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black',
-        },
+        { id: 'vip_customers', label: 'Customers', icon: Crown },
+        { id: 'suppliers', label: 'Suppliers', icon: Truck },
+        { id: 'estimates', label: 'Orders', icon: ClipboardList, count: estimates.length || undefined },
+        { id: 'payments', label: 'Sales History', icon: Receipt, count: sales.length || undefined },
+        { id: 'returns', label: 'Returns & Exchanges', icon: RotateCcw, count: returns.length || undefined },
       ],
     },
     {
-      title: 'Finance & Team',
+      title: 'Growth & Settings',
       items: [
-        {
-          id: 'attendance',
-          label: 'Staff Attendance',
-          sublabel: 'Haazri & Hours',
-          icon: UserCheck,
-          badge: `${attendanceRecords.filter((r) => r.date === new Date().toISOString().split('T')[0]).length} Today`,
-          badgeColor: 'bg-emerald-600 text-white font-bold',
-        },
-        {
-          id: 'salary',
-          label: 'Staff Salary',
-          sublabel: 'Payroll & Advance',
-          icon: Users,
-          badge: staffMembers.length > 0 ? `${staffMembers.length}` : null,
-          badgeColor: 'bg-purple-600 text-white',
-        },
-        {
-          id: 'staff_roles',
-          label: 'Staff Roles & RBAC',
-          sublabel: 'Cashier/POS Guard',
-          icon: ShieldAlert,
-          badge: effectiveRole.toUpperCase(),
-          badgeColor:
-            effectiveRole === 'cashier'
-              ? 'bg-amber-500 text-slate-950 font-black'
-              : 'bg-indigo-600 text-white',
-        },
-        {
-          id: 'expenses',
-          label: 'Spend Money',
-          sublabel: 'Daily Sheet & WA',
-          icon: TrendingDown,
-          badge: expenses.length > 0 ? `${expenses.length}` : null,
-          badgeColor: 'bg-rose-500 text-white',
-        },
-        {
-          id: 'suppliers',
-          label: 'Suppliers',
-          sublabel: 'Payables Ledger',
-          icon: Truck,
-          badge: null,
-          badgeColor: '',
-        },
-        {
-          id: 'analytics',
-          label: 'Analytics & BI',
-          sublabel: 'Growth Forecast',
-          icon: BarChart3,
-          badge: null,
-          badgeColor: '',
-        },
+        { id: 'promotions', label: 'Discounts & Promotions', icon: Tag, count: activeCouponCount || undefined },
+        { id: 'analytics', label: 'Reports & Analytics', icon: BarChart3 },
+        { id: 'settings', label: 'Settings', icon: Settings },
       ],
     },
     {
-      title: 'Customization & SaaS',
+      title: 'Store Tools & Ledgers',
       items: [
-        {
-          id: 'bill_templates',
-          label: 'Bill Templates',
-          sublabel: 'Thermal, A4, Dual-Cable',
-          icon: FileText,
-          badge: '7 Designs',
-          badgeColor: 'bg-indigo-500 text-white font-bold',
-        },
-        {
-          id: 'theme_library',
-          label: 'SaaS Themes',
-          sublabel: '7 UI Layouts',
-          icon: Palette,
-          badge: 'Presets',
-          badgeColor: 'bg-purple-500 text-white font-bold',
-        },
-      ],
-    },
-    {
-      title: 'System & Settings',
-      items: [
-        {
-          id: 'settings',
-          label: 'Settings',
-          sublabel: 'Store & QR Codes',
-          icon: Settings,
-          badge: null,
-          badgeColor: '',
-        },
+        { id: 'ai_hub', label: 'AI Bill & Rate Scanner', icon: Sparkles },
+        { id: 'khata', label: 'Udhar Khatta', icon: BookOpen, count: totalUdharCustomers || undefined },
+        { id: 'person_khatta', label: 'Person Khatta', icon: BookUser },
+        { id: 'branches', label: 'Multi-Branch', icon: Building2 },
+        { id: 'expenses', label: 'Expenses', icon: TrendingDown },
+        { id: 'ai_manager', label: 'WhatsApp Reports', icon: Bot },
+        { id: 'staff_roles', label: 'Staff & Roles', icon: ShieldAlert },
+        { id: 'attendance', label: 'Attendance', icon: UserCheck },
+        { id: 'salary', label: 'Staff Payroll', icon: Users },
+        { id: 'bill_templates', label: 'Invoice Templates', icon: FileText },
+        { id: 'theme_library', label: 'Appearance Presets', icon: Palette },
+        { id: 'activity_logs', label: 'Activity Logs', icon: Activity },
       ],
     },
   ];
 
-  // User account & RBAC Filter:
-  // Admin Panel is strictly HIDDEN on all user accounts, only accessible by bashirsonselectric@gmail.com
+  // Strict RBAC & Super Admin Hide Policy: Admin panel NEVER shown in sidebar
   const visibleSections = navSections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => {
-        if (item.id === 'admin' && !isMasterAdmin) {
+        if (item.id === 'admin') return false;
+        if (!isUserAdmin && (item.id === 'staff_roles' || item.id === 'activity_logs')) {
           return false;
         }
-        if (!isUserAdmin && item.id === 'staff_roles') {
-          return false;
-        }
+        if (item.id === 'activity_logs') return isUserAdmin;
         return isTabAllowedForRole(item.id);
       }),
     }))
     .filter((section) => section.items.length > 0);
 
-
-  // Auto-expand the dropdown section that contains the currently active tab
   React.useEffect(() => {
     const parent = visibleSections.find((sec) =>
       sec.items.some((item) => item.id === activeTab)
@@ -444,85 +260,81 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   return (
     <>
-      {/* DESKTOP SIDE MENU (SIDEBAR) */}
+      {/* DESKTOP SIDEBAR — Luxury Fashion Boutique Aesthetic */}
       <aside
-        className={`hidden md:flex flex-col bg-slate-900 text-white border-r border-slate-800 transition-all duration-300 z-20 shrink-0 sticky top-16 h-[calc(100vh-4rem)] select-none ${
-          isCollapsed ? 'w-20' : 'w-64'
+        className={`hidden md:flex flex-col bg-white dark:bg-[#161412] text-[#141414] dark:text-[#F6F1EB] border-r border-[#E8E0D8] dark:border-[#2A2622] transition-all duration-200 z-20 shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] select-none ${
+          isCollapsed ? 'w-[72px]' : 'w-60'
         }`}
       >
-        {/* 1. DYNAMIC VERTICAL ENGINE SWITCHER (Moved to Side Menu) */}
-        <div className="relative p-2.5 border-b border-slate-800">
+        {/* Boutique Collection / Business Type Switcher */}
+        <div className="relative p-3 border-b border-[#EFE8E0] dark:border-[#2A2622]">
           {!isCollapsed ? (
             <button
+              type="button"
               onClick={() => setVerticalDropdownOpen(!verticalDropdownOpen)}
-              className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-xs transition-colors group cursor-pointer"
-              title="Switch business category & dynamic inventory schema"
+              className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-[#FAF7F4] dark:bg-[#1F1C19] hover:bg-[#F6F1EB] dark:hover:bg-[#282420] border border-[#E8E0D8] dark:border-[#2E2A26] text-xs transition-colors cursor-pointer"
             >
-              <div className="flex items-center space-x-2.5 min-w-0">
-                <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-700 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="p-1.5 rounded-lg bg-[#F3E1DF] dark:bg-[#3A2827] shrink-0">
                   {getVerticalIcon(activeVertical)}
                 </div>
                 <div className="text-left min-w-0">
-                  <div className="text-[9px] text-slate-400 uppercase tracking-wider font-semibold">
-                    Vertical Engine
+                  <div className="text-[10px] uppercase tracking-[0.14em] text-[#7D6E65] dark:text-[#A89E96] font-semibold">
+                    Store Mode
                   </div>
-                  <div className="font-bold text-white truncate text-xs">
-                    {VERTICALS_CONFIG[activeVertical]?.name || 'Retail'}
+                  <div className="font-semibold text-[#141414] dark:text-[#F6F1EB] truncate text-xs">
+                    {activeVertical === 'clothing_apparel'
+                      ? 'Fashion Boutique'
+                      : VERTICALS_CONFIG[activeVertical]?.name || 'Boutique'}
                   </div>
                 </div>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-white shrink-0 ml-1" />
+              <ChevronDown className="w-3.5 h-3.5 text-[#7D6E65] shrink-0" />
             </button>
           ) : (
             <div className="flex justify-center">
               <button
+                type="button"
                 onClick={() => setVerticalDropdownOpen(!verticalDropdownOpen)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
-                title={`Vertical: ${VERTICALS_CONFIG[activeVertical]?.name} (Click to switch)`}
+                className="p-2 rounded-xl bg-[#F6F1EB] dark:bg-[#221F1C] border border-[#E8E0D8] dark:border-[#2E2A26] cursor-pointer"
+                title={activeVertical === 'clothing_apparel' ? 'Fashion Boutique' : VERTICALS_CONFIG[activeVertical]?.name}
               >
                 {getVerticalIcon(activeVertical)}
               </button>
             </div>
           )}
 
-          {/* Vertical Selection Dropdown Menu */}
           {verticalDropdownOpen && (
             <div
-              className={`absolute top-full mt-1.5 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-1 ${
-                isCollapsed ? 'left-2 w-64' : 'left-2.5 right-2.5'
+              className={`absolute top-full mt-1.5 rounded-xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] shadow-xl p-1.5 z-50 ${
+                isCollapsed ? 'left-2 w-60' : 'left-3 right-3'
               }`}
             >
-              <div className="px-2.5 py-1.5 text-[10px] font-bold text-slate-400 border-b border-slate-700 flex justify-between items-center">
-                <span>DYNAMIC VERTICAL ENGINE</span>
-                <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1 rounded">
-                  Adapts Schema
-                </span>
-              </div>
-              <div className="space-y-1 mt-1 max-h-56 overflow-y-auto custom-scrollbar">
+              <div className="space-y-0.5 max-h-60 overflow-y-auto custom-scrollbar">
                 {(Object.keys(VERTICALS_CONFIG) as BusinessVertical[]).map((vKey) => {
                   const conf = VERTICALS_CONFIG[vKey];
                   const isSelected = activeVertical === vKey;
                   return (
                     <button
                       key={vKey}
+                      type="button"
                       onClick={() => {
                         setActiveVertical(vKey);
                         setVerticalDropdownOpen(false);
                       }}
-                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2 transition-colors cursor-pointer ${
                         isSelected
-                          ? 'bg-emerald-500/20 text-white font-semibold border border-emerald-500/30'
-                          : 'text-slate-300 hover:bg-slate-700/60'
+                          ? 'bg-[#F3E1DF] dark:bg-[#3A2827] text-[#141414] dark:text-[#F6F1EB] font-semibold'
+                          : 'text-[#4A433E] dark:text-[#C9BFB6] hover:bg-[#FAF7F4] dark:hover:bg-[#24201C]'
                       }`}
                     >
-                      <div className="flex items-center space-x-2 min-w-0">
-                        {getVerticalIcon(vKey)}
-                        <div className="min-w-0">
-                          <div className="truncate font-semibold">{conf.name}</div>
-                          <div className="text-[10px] text-slate-400">{conf.urduName}</div>
+                      {getVerticalIcon(vKey)}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate">
+                          {vKey === 'clothing_apparel' ? 'Fashion Boutique & Apparel' : conf.name}
                         </div>
+                        <div className="text-[10px] text-[#7D6E65] dark:text-[#8E847C] truncate">{conf.urduName}</div>
                       </div>
-                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>}
                     </button>
                   );
                 })}
@@ -531,158 +343,90 @@ export const Navigation: React.FC<NavigationProps> = ({
           )}
         </div>
 
-        {/* 2. PRICE ADJUSTER (+/-) QUICK TRIGGER (Moved to Side Menu) */}
-        {onOpenPriceAdjuster && (
-          <div className="px-2.5 pt-2">
-            {!isCollapsed ? (
-              <button
-                onClick={onOpenPriceAdjuster}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-amber-500/30 text-xs font-semibold text-amber-300 hover:text-amber-200 transition-colors shadow-2xs group cursor-pointer"
-                title="Increase or Decrease Catalog Prices"
-              >
-                <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-                    <Percent className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="truncate">Price Adjuster (+/-)</span>
-                </div>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
-                  Quick
-                </span>
-              </button>
-            ) : (
-              <div className="flex justify-center">
-                <button
-                  onClick={onOpenPriceAdjuster}
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/30 text-amber-400 transition-colors cursor-pointer"
-                  title="Price Adjuster (+/-)"
-                >
-                  <Percent className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Role Notice & Simulation Banner */}
+        {/* Cashier Mode Notice */}
         {effectiveRole === 'cashier' && !isCollapsed && (
-          <div className="mx-2.5 mt-2 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px]">
-            <div className="font-bold flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <ShieldAlert className="w-3 h-3 text-amber-400" />
-                CASHIER MODE
-              </span>
+          <div className="mx-3 mt-2.5 p-2.5 rounded-xl bg-[#F3E1DF]/60 dark:bg-[#342322] border border-[#E5C6C3] dark:border-[#533836] text-[#141414] dark:text-[#F6F1EB] text-[11px]">
+            <div className="font-semibold flex items-center justify-between">
+              <span>Cashier Counter Mode</span>
               {simulatedRole && (
                 <button
+                  type="button"
                   onClick={() => setSimulatedRole(null)}
-                  className="underline hover:text-white text-[9px] text-amber-400"
+                  className="underline text-[10px] cursor-pointer"
                 >
-                  Exit Demo
+                  Exit
                 </button>
               )}
             </div>
-            <div className="text-slate-400 text-[9px] mt-0.5 leading-tight">
-              Only POS option is visible as requested.
+            <div className="text-[10px] text-[#6B625C] dark:text-[#C9BFB6] mt-0.5">
+              Counter checkout operations only.
             </div>
           </div>
         )}
 
-        {/* 3. SCROLLABLE NAVIGATION GROUPS (Interactive Dropdown Accordions) */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar py-3 px-2.5 space-y-2.5">
-          {visibleSections.map((section, sIdx) => {
+        {/* Navigation Groups */}
+        <nav className="flex-1 overflow-y-auto custom-scrollbar py-3 px-2.5 space-y-3">
+          {visibleSections.map((section) => {
             const isOpen = openSections[section.title] ?? true;
-            const hasActiveChild = section.items.some((item) => item.id === activeTab);
-
             return (
-              <div key={sIdx} className="space-y-1">
+              <div key={section.title} className="space-y-1">
                 {!isCollapsed ? (
                   <button
                     type="button"
                     onClick={() => toggleSection(section.title)}
-                    className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer group select-none"
-                    title={`Click to ${isOpen ? 'collapse' : 'expand'} ${section.title}`}
+                    className="w-full flex items-center justify-between px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A7E75] hover:text-[#141414] dark:hover:text-[#F6F1EB] cursor-pointer"
                   >
-                    <div className="flex items-center space-x-1.5 truncate">
-                      <span className={hasActiveChild ? 'text-indigo-400 font-extrabold' : 'text-slate-300 group-hover:text-white'}>
-                        {section.title}
-                      </span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-400 font-semibold group-hover:text-slate-200">
-                        {section.items.length}
-                      </span>
-                    </div>
+                    <span>{section.title}</span>
                     <ChevronDown
-                      className={`w-3.5 h-3.5 text-slate-400 group-hover:text-white transition-transform duration-200 ${
-                        isOpen ? 'rotate-0 text-indigo-400' : '-rotate-90 text-slate-500'
-                      }`}
+                      className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-0' : '-rotate-90'}`}
                     />
                   </button>
                 ) : (
-                  sIdx > 0 && <div className="border-t border-slate-800/80 my-2 mx-1" />
+                  <div className="border-t border-[#EFE8E0] dark:border-[#2A2622] my-1.5" />
                 )}
 
-                {/* Sub-pages dropdown list */}
                 {(!isCollapsed ? isOpen : true) && (
-                  <div className={!isCollapsed ? 'space-y-1 ml-2 pl-2 border-l-2 border-slate-800/80' : 'space-y-1'}>
+                  <div className="space-y-0.5">
                     {section.items.map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
-
                       return (
                         <button
                           key={item.id}
+                          type="button"
                           onClick={() => setActiveTab(item.id)}
-                          title={isCollapsed ? `${item.label} (${item.sublabel})` : undefined}
-                          className={`w-full flex items-center rounded-xl text-xs font-semibold transition-all group relative cursor-pointer ${
-                            isCollapsed
-                              ? 'justify-center p-2.5'
-                              : 'justify-between px-3 py-2'
+                          title={isCollapsed ? item.label : undefined}
+                          className={`w-full flex items-center rounded-xl text-xs font-medium transition-all relative cursor-pointer ${
+                            isCollapsed ? 'justify-center p-2.5' : 'justify-between px-2.5 py-2'
                           } ${
                             isActive
-                              ? 'theme-active-nav shadow-md font-bold text-white'
-                              : 'text-slate-200 hover:text-white hover:bg-slate-800/80'
+                              ? 'bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] font-semibold shadow-xs'
+                              : 'text-[#4A433E] dark:text-[#C9BFB6] hover:bg-[#F6F1EB] dark:hover:bg-[#221F1C] hover:text-[#141414] dark:hover:text-[#F6F1EB]'
                           }`}
                         >
-                          <div className="flex items-center space-x-2.5 min-w-0">
+                          <span className="flex items-center gap-2.5 min-w-0">
                             <Icon
-                              className={`w-4 h-4 shrink-0 transition-transform ${
+                              className={`w-4 h-4 shrink-0 ${
                                 isActive
-                                  ? 'text-white scale-110'
-                                  : 'text-slate-400 group-hover:text-white'
+                                  ? 'text-[#F3E1DF] dark:text-[#141414]'
+                                  : 'text-[#8A7E75] dark:text-[#8E847C]'
                               }`}
                             />
-                            {!isCollapsed && (
-                              <div className="text-left min-w-0">
-                                <div className="leading-tight truncate text-white font-medium">{item.label}</div>
-                                <div
-                                  className={`text-[9.5px] font-normal leading-tight truncate ${
-                                    isActive ? 'text-white/80' : 'text-slate-400'
-                                  }`}
-                                >
-                                  {item.sublabel}
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                            {!isCollapsed && <span className="truncate">{item.label}</span>}
+                          </span>
 
-                          {/* Badge */}
-                          {!isCollapsed ? (
-                            item.badge && (
-                              <span
-                                className={`ml-1 text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider shrink-0 ${
-                                  isActive ? 'bg-white/20 text-white' : item.badgeColor
-                                }`}
-                              >
-                                {item.badge}
-                              </span>
-                            )
-                          ) : (
-                            item.badge && (
-                              <span
-                                className={`absolute top-1 right-1 w-2 h-2 rounded-full ring-2 ring-slate-900 ${
-                                  item.badgeColor?.includes('bg-rose') ? 'bg-rose-500' : 'bg-emerald-400'
-                                }`}
-                              />
-                            )
+                          {!isCollapsed && item.count !== undefined && item.count > 0 && (
+                            <span
+                              className={`text-[10px] font-mono-numbers font-semibold px-1.5 py-0.5 rounded-md ${
+                                isActive
+                                  ? 'bg-white/15 dark:bg-black/10 text-white dark:text-[#141414]'
+                                  : item.alert
+                                  ? 'bg-[#F3E1DF] dark:bg-[#422323] text-[#9B2C2C] dark:text-[#FCA5A5]'
+                                  : 'text-[#7D6E65] dark:text-[#A89E96]'
+                              }`}
+                            >
+                              {item.count}
+                            </span>
                           )}
                         </button>
                       );
@@ -692,176 +436,122 @@ export const Navigation: React.FC<NavigationProps> = ({
               </div>
             );
           })}
-        </div>
+        </nav>
 
-        {/* 4. USER PROFILE & SIGN OUT COMPONENT (Moved to Side Menu Bottom) */}
-        <div className="relative border-t border-slate-800 p-2.5 bg-slate-950/40">
+        {/* Bottom User Profile & Collapse */}
+        <div className="relative border-t border-[#EFE8E0] dark:border-[#2A2622] p-2.5">
           {!isCollapsed ? (
             <button
+              type="button"
               onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-              className="w-full flex items-center justify-between p-2 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 transition-all text-xs group cursor-pointer"
-              title="Google Account Profile & Settings"
+              className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-[#F6F1EB] dark:hover:bg-[#221F1C] transition-colors text-xs cursor-pointer"
             >
-              <div className="flex items-center space-x-2.5 min-w-0">
-                {userSession.photoURL ? (
-                  <img
-                    src={userSession.photoURL}
-                    alt={userSession.displayName}
-                    className="w-8 h-8 rounded-lg object-cover ring-1 ring-emerald-400/60 shrink-0"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold ring-1 ring-white/20 shrink-0">
-                    {userSession.displayName.charAt(0)}
-                  </div>
-                )}
-                <div className="text-left min-w-0 leading-tight">
-                  <div className="font-bold text-white truncate max-w-[120px]">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-[#141414] dark:bg-[#F3E1DF] text-white dark:text-[#141414] flex items-center justify-center font-semibold text-xs shrink-0 overflow-hidden">
+                  {userSession.photoURL ? (
+                    <img src={userSession.photoURL} alt={userSession.displayName} className="w-full h-full object-cover" />
+                  ) : (
+                    (userSession.displayName || 'U').charAt(0).toUpperCase()
+                  )}
+                </div>
+                <div className="text-left min-w-0">
+                  <div className="font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
                     {userSession.displayName}
                   </div>
-                  <div className="text-[10px] text-slate-400 truncate max-w-[120px] font-mono">
+                  <div className="text-[10px] text-[#7D6E65] dark:text-[#A89E96] truncate">
                     {userSession.email}
-                  </div>
-                  <div className="text-[9px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>{isMasterAdmin ? 'Super Admin' : 'Cashier'}</span>
                   </div>
                 </div>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-white shrink-0 ml-1" />
+              <ChevronDown className="w-3.5 h-3.5 text-[#7D6E65] shrink-0" />
             </button>
           ) : (
             <div className="flex justify-center">
               <button
+                type="button"
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="p-1 rounded-xl hover:bg-slate-800 transition-all cursor-pointer"
-                title={`${userSession.displayName} (${userSession.email})`}
+                className="w-8 h-8 rounded-full bg-[#141414] dark:bg-[#F3E1DF] text-white dark:text-[#141414] flex items-center justify-center font-semibold text-xs cursor-pointer"
+                title={userSession.displayName}
               >
-                {userSession.photoURL ? (
-                  <img
-                    src={userSession.photoURL}
-                    alt={userSession.displayName}
-                    className="w-8 h-8 rounded-lg object-cover ring-1 ring-emerald-400/60"
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold ring-1 ring-white/20">
-                    {userSession.displayName.charAt(0)}
-                  </div>
-                )}
+                {(userSession.displayName || 'U').charAt(0).toUpperCase()}
               </button>
             </div>
           )}
 
-          {/* User Profile Dropdown Popover */}
           {userDropdownOpen && (
             <div
-              className={`absolute bottom-full mb-2 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-bottom-2 ${
-                isCollapsed ? 'left-2 w-72' : 'left-2.5 right-2.5'
+              className={`absolute bottom-full mb-2 rounded-xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] shadow-xl p-2 z-50 ${
+                isCollapsed ? 'left-2 w-60' : 'left-2.5 right-2.5'
               }`}
             >
-              {/* Profile Header */}
-              <div className="flex items-center space-x-2.5 pb-2.5 border-b border-slate-700">
-                {userSession.photoURL ? (
-                  <img
-                    src={userSession.photoURL}
-                    alt={userSession.displayName}
-                    className="w-9 h-9 rounded-xl object-cover ring-2 ring-emerald-500/50"
-                  />
-                ) : (
-                  <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
-                    G
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-bold text-white truncate">
-                    {userSession.displayName}
-                  </div>
-                  <div className="text-[10px] text-slate-400 truncate font-mono">
-                    {userSession.email}
-                  </div>
-                  <div className="text-[9px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    <span>{isMasterAdmin ? 'Super Owner' : 'Verified Google'}</span>
-                  </div>
+              <div className="px-2 py-2 border-b border-[#EFE8E0] dark:border-[#2A2622]">
+                <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
+                  {userSession.displayName}
+                </div>
+                <div className="text-[10px] text-[#7D6E65] dark:text-[#A89E96] truncate">
+                  {userSession.email}
+                </div>
+                <div className="text-[10px] text-[#2F6B4F] dark:text-[#6EE7B7] font-semibold flex items-center gap-1 mt-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>{isMasterAdmin ? 'Super Owner' : `${effectiveRole.toUpperCase()} Account`}</span>
                 </div>
               </div>
-
-              {/* Action Links */}
-              <div className="py-2 space-y-1 text-xs">
+              <div className="py-1 space-y-0.5 text-xs">
                 {onOpenAuthModal && (
                   <button
+                    type="button"
                     onClick={() => {
                       setUserDropdownOpen(false);
                       onOpenAuthModal();
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-emerald-300 hover:bg-slate-700 flex items-center justify-between font-semibold"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] flex items-center gap-2 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
-                      <Building2 className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Switch Store / Register</span>
-                    </span>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded">New</span>
+                    <Building2 className="w-3.5 h-3.5 text-[#7D6E65]" />
+                    <span>Switch / Add Boutique</span>
                   </button>
                 )}
-
                 {onOpenProfileModal && (
                   <button
+                    type="button"
                     onClick={() => {
                       setUserDropdownOpen(false);
                       onOpenProfileModal();
                     }}
-                    className="w-full text-left px-2 py-1.5 rounded-lg text-slate-200 hover:bg-slate-700 flex items-center justify-between"
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] flex items-center gap-2 cursor-pointer"
                   >
-                    <span className="flex items-center gap-2">
-                      <User className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Account Identity Settings</span>
-                    </span>
-                    <span className="text-[9px] text-slate-500">View</span>
+                    <User className="w-3.5 h-3.5 text-[#7D6E65]" />
+                    <span>Profile & Password</span>
                   </button>
                 )}
-
-                <div className="p-2 rounded-lg bg-slate-900/60 text-[10px] text-slate-400 space-y-0.5 mt-1">
-                  <div className="flex justify-between">
-                    <span>Store:</span>
-                    <span className="text-slate-200 font-medium truncate max-w-[120px]">{storeProfile.name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Plan:</span>
-                    <span className="text-amber-400 font-medium capitalize">{storeProfile.saasTier}</span>
-                  </div>
-                </div>
               </div>
-
-              {/* Sign Out Action */}
-              <div className="pt-2 border-t border-slate-700">
+              <div className="pt-1 border-t border-[#EFE8E0] dark:border-[#2A2622]">
                 <button
+                  type="button"
                   onClick={() => {
-                    googleSignOut();
                     setUserDropdownOpen(false);
+                    googleSignOut();
                   }}
-                  className="w-full py-1.5 px-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-bold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+                  className="w-full py-1.5 px-2.5 rounded-lg text-[#9B2C2C] dark:text-[#FCA5A5] hover:bg-[#F3E1DF]/50 dark:hover:bg-[#3A2121] text-xs font-semibold flex items-center gap-2 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out Account</span>
+                  <span>Sign Out</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* Sidebar Collapse Toggle Button */}
           {onToggleCollapse && (
             <button
+              type="button"
               onClick={onToggleCollapse}
-              className={`w-full mt-2 flex items-center justify-center p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-medium transition-colors cursor-pointer ${
-                !isCollapsed ? 'space-x-2' : ''
-              }`}
-              title={isCollapsed ? 'Expand Side Menu' : 'Collapse Side Menu'}
+              className="w-full mt-1.5 flex items-center justify-center gap-1.5 p-1.5 rounded-lg text-[#7D6E65] hover:text-[#141414] dark:hover:text-[#F6F1EB] hover:bg-[#F6F1EB] dark:hover:bg-[#221F1C] text-[11px] font-medium transition-colors cursor-pointer"
             >
               {isCollapsed ? (
                 <PanelLeft className="w-4 h-4" />
               ) : (
                 <>
                   <ChevronLeft className="w-3.5 h-3.5" />
-                  <span className="text-[11px] font-semibold">Collapse Side Menu</span>
+                  <span>Collapse Sidebar</span>
                 </>
               )}
             </button>
@@ -869,222 +559,114 @@ export const Navigation: React.FC<NavigationProps> = ({
         </div>
       </aside>
 
-      {/* MOBILE DRAWER MENU (RESPONSIVE SLIDE-OVER) */}
+      {/* MOBILE DRAWER */}
       {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden bg-slate-900/80 backdrop-blur-xs flex animate-in fade-in">
-          <div className="w-4/5 max-w-xs bg-slate-900 text-white h-full flex flex-col justify-between p-4 shadow-2xl animate-in slide-in-from-left">
-            <div>
-              {/* Drawer Top */}
-              <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
-                <div className="flex items-center space-x-2">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center font-black text-xs text-white">
-                    AI
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm">Apna AI POS</div>
-                    <div className="text-[10px] text-slate-400 truncate max-w-[150px]">
-                      {storeProfile.name}
-                    </div>
+        <div className="fixed inset-0 z-50 md:hidden bg-black/50 flex">
+          <div className="w-4/5 max-w-xs bg-white dark:bg-[#161412] text-[#141414] dark:text-[#F6F1EB] h-full flex flex-col justify-between p-4 shadow-xl border-r border-[#E8E0D8] dark:border-[#2A2622]">
+            <div className="flex flex-col min-h-0 flex-1">
+              <div className="flex items-center justify-between pb-3 border-b border-[#EFE8E0] dark:border-[#2A2622]">
+                <div className="min-w-0">
+                  <div className="font-editorial font-semibold text-base truncate">{storeProfile.name}</div>
+                  <div className="text-[10px] uppercase tracking-[0.16em] text-[#7D6E65] dark:text-[#A89E96]">
+                    Boutique POS
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white"
+                  className="p-1.5 rounded-lg text-[#7D6E65] hover:text-[#141414] dark:hover:text-white"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Vertical Selector in Mobile Drawer */}
-              <div className="py-2.5 border-b border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
-                  Business Vertical
-                </span>
-                <select
-                  value={activeVertical}
-                  onChange={(e) => setActiveVertical(e.target.value as BusinessVertical)}
-                  className="w-full bg-slate-800 border border-slate-700 text-xs text-slate-200 rounded-lg p-2 font-semibold"
-                >
-                  {(Object.keys(VERTICALS_CONFIG) as BusinessVertical[]).map((vKey) => (
-                    <option key={vKey} value={vKey}>
-                      {VERTICALS_CONFIG[vKey].name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Mobile Price Adjuster Button */}
-              {onOpenPriceAdjuster && (
-                <div className="py-2 border-b border-slate-800">
-                  <button
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      onOpenPriceAdjuster();
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-slate-800 border border-amber-500/30 text-amber-300 text-xs font-semibold"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Percent className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Price Adjuster (+/-)</span>
-                    </span>
-                    <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold">
-                      Open
-                    </span>
-                  </button>
-                </div>
-              )}
-
-              {/* Navigation Links in Mobile Drawer (Dropdown Accordions) */}
-              <div className="py-2.5 space-y-2.5 overflow-y-auto max-h-[50vh] custom-scrollbar">
-                {visibleSections.map((section, sIdx) => {
-                  const isOpen = openSections[section.title] ?? true;
-                  const hasActiveChild = section.items.some((item) => item.id === activeTab);
-
-                  return (
-                    <div key={sIdx} className="space-y-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleSection(section.title)}
-                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[10.5px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                      >
-                        <span className={hasActiveChild ? 'text-indigo-400 font-extrabold' : 'text-slate-300'}>
-                          {section.title} ({section.items.length})
-                        </span>
-                        <ChevronDown
-                          className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                            isOpen ? 'rotate-0 text-indigo-400' : '-rotate-90 text-slate-500'
-                          }`}
-                        />
-                      </button>
-
-                      {isOpen && (
-                        <div className="space-y-1 ml-2 pl-2 border-l-2 border-slate-800">
-                          {section.items.map((item) => {
-                            const Icon = item.icon;
-                            const isActive = activeTab === item.id;
-                            return (
-                              <button
-                                key={item.id}
-                                onClick={() => {
-                                  setActiveTab(item.id);
-                                  setMobileMenuOpen(false);
-                                }}
-                                className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
-                                  isActive
-                                    ? 'theme-active-nav font-bold text-white'
-                                    : 'text-slate-200 hover:text-white hover:bg-slate-800'
-                                }`}
-                              >
-                                <div className="flex items-center space-x-2.5">
-                                  <Icon className="w-4 h-4 text-slate-300" />
-                                  <div>
-                                    <div className="text-white font-medium">{item.label}</div>
-                                    <div className="text-[10px] text-slate-400 font-normal">
-                                      {item.sublabel}
-                                    </div>
-                                  </div>
-                                </div>
-                                {item.badge && (
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${item.badgeColor}`}>
-                                    {item.badge}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="py-3 space-y-3 overflow-y-auto flex-1 custom-scrollbar">
+                {visibleSections.map((section) => (
+                  <div key={section.title} className="space-y-1">
+                    <div className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A7E75]">
+                      {section.title}
                     </div>
-                  );
-                })}
+                    {section.items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(item.id);
+                            setMobileMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
+                            isActive
+                              ? 'bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] font-semibold'
+                              : 'text-[#4A433E] dark:text-[#C9BFB6] hover:bg-[#F6F1EB] dark:hover:bg-[#221F1C]'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <Icon className="w-4 h-4" />
+                            <span>{item.label}</span>
+                          </span>
+                          {item.count !== undefined && item.count > 0 && (
+                            <span className="text-[10px] font-mono-numbers font-semibold">{item.count}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Mobile Drawer Bottom User Session Info */}
-            <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-400 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-white font-bold truncate">{userSession.displayName}</div>
-                  <div className="text-slate-400 text-[10px] font-mono truncate">{userSession.email}</div>
-                  {effectiveRole === 'cashier' && (
-                    <div className="text-amber-400 text-[9px] font-semibold mt-0.5">Role: Cashier (POS Only)</div>
-                  )}
-                </div>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    googleSignOut();
-                  }}
-                  className="px-2 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-[10px] font-bold flex items-center gap-1"
-                >
-                  <LogOut className="w-3 h-3" />
-                  <span>Out</span>
-                </button>
+            <div className="pt-3 border-t border-[#EFE8E0] dark:border-[#2A2622] flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold truncate">{userSession.displayName}</div>
+                <div className="text-[10px] text-[#7D6E65] truncate">{userSession.email}</div>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  googleSignOut();
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-[#F3E1DF] dark:bg-[#3A2121] text-[#9B2C2C] dark:text-[#FCA5A5] text-xs font-semibold flex items-center gap-1 shrink-0"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
             </div>
           </div>
-
-          <div className="flex-1" onClick={() => setMobileMenuOpen(false)}></div>
+          <div className="flex-1" onClick={() => setMobileMenuOpen(false)} />
         </div>
       )}
 
-      {/* MOBILE STICKY BOTTOM ACTION BAR FOR QUICK POS ACCESS */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 px-3 py-2 md:hidden flex justify-around items-center shadow-lg">
-        {isTabAllowedForRole('pos') && (
-          <button
-            onClick={() => setActiveTab('pos')}
-            className={`flex flex-col items-center text-[10px] font-bold ${
-              activeTab === 'pos' ? 'text-emerald-600' : 'text-slate-500'
-            }`}
-          >
-            <CreditCard className="w-4 h-4 mb-0.5" />
-            <span>Counter</span>
-          </button>
-        )}
-
-        {isTabAllowedForRole('khata') && (
-          <button
-            onClick={() => setActiveTab('khata')}
-            className={`flex flex-col items-center text-[10px] font-bold ${
-              activeTab === 'khata' ? 'text-emerald-600' : 'text-slate-500'
-            }`}
-          >
-            <BookOpen className="w-4 h-4 mb-0.5" />
-            <span>Khata</span>
-          </button>
-        )}
-
-        {isTabAllowedForRole('ai_hub') && (
-          <button
-            onClick={() => setActiveTab('ai_hub')}
-            className={`flex flex-col items-center text-[10px] font-bold ${
-              activeTab === 'ai_hub' ? 'text-emerald-600' : 'text-slate-500'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 mb-0.5 text-amber-500" />
-            <span>AI Ingest</span>
-          </button>
-        )}
-
-        {isTabAllowedForRole('inventory') && (
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex flex-col items-center text-[10px] font-bold ${
-              activeTab === 'inventory' ? 'text-emerald-600' : 'text-slate-500'
-            }`}
-          >
-            <Package className="w-4 h-4 mb-0.5" />
-            <span>Catalog</span>
-          </button>
-        )}
-
-        <button
-          onClick={() => setMobileMenuOpen(true)}
-          className="flex flex-col items-center text-[10px] font-bold text-slate-500"
-        >
-          <PanelLeft className="w-4 h-4 mb-0.5" />
-          <span>Menu</span>
-        </button>
+      {/* MOBILE BOTTOM NAVIGATION */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 bg-white dark:bg-[#161412] border-t border-[#E8E0D8] dark:border-[#2A2622] px-2 py-2 md:hidden flex justify-around items-center">
+        {[
+          { id: 'dashboard' as ActiveTab, label: 'Home', icon: LayoutDashboard },
+          { id: 'pos' as ActiveTab, label: 'POS', icon: CreditCard },
+          { id: 'categories' as ActiveTab, label: 'Catalog', icon: Grid2x2 },
+          { id: 'inventory' as ActiveTab, label: 'Products', icon: Package },
+          { id: 'analytics' as ActiveTab, label: 'Reports', icon: BarChart3 },
+        ]
+          .filter((t) => isTabAllowedForRole(t.id))
+          .map((t) => {
+            const Icon = t.icon;
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTab(t.id)}
+                className={`flex flex-col items-center text-[10px] font-semibold px-2 py-0.5 rounded-lg ${
+                  active ? 'text-[#141414] dark:text-[#F3E1DF]' : 'text-[#8A7E75]'
+                }`}
+              >
+                <Icon className="w-4 h-4 mb-0.5" />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
       </div>
     </>
   );

@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { usePos } from '../../context/PosContext';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
 import { Product, BusinessVertical, StockBackupRecord } from '../../types';
+import { PRODUCT_PRESET_IMAGES } from '../../lib/productThumbnails';
 import {
   Package,
   TrendingUp,
@@ -64,7 +65,7 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
     name: 'Gm Cable',
     size: '3/29',
     color: 'Red',
-    image: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=400',
+    image: PRODUCT_PRESET_IMAGES.cableRed,
     category: 'Cables & Wiring',
     costPrice: 5350,
     retailPrice: 6300,

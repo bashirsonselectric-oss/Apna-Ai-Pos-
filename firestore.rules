@@ -1,0 +1,460 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // HARDENED GLOBAL PRIMITIVES
+    // =========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'bashirsonselectric@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isStoreOwner(storeId) {
+      return exists(/databases/$(database)/documents/stores/$(storeId)) &&
+        get(/databases/$(database)/documents/stores/$(storeId)).data.ownerId == request.auth.uid;
+    }
+
+    // =========================================================================
+    // VALIDATION BLUEPRINTS (Anti-Update-Gap Helpers)
+    // =========================================================================
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'activeStoreId', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role in ['owner', 'admin', 'manager', 'cashier', 'staff'] &&
+        (!('activeStoreId' in data) || isValidId(data.activeStoreId)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStore(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'businessName', 'storeName', 'currency', 'taxRate', 'vertical', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'businessName', 'storeName', 'currency', 'taxRate', 'vertical', 'phone', 'address', 'city', 'receiptFooter', 'logoUrl', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        data.businessName is string && data.businessName.size() >= 1 && data.businessName.size() <= 160 &&
+        data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 160 &&
+        data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 12 &&
+        data.taxRate is number && data.taxRate >= 0 && data.taxRate <= 100 &&
+        data.vertical is string && data.vertical.size() >= 1 && data.vertical.size() <= 64 &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        (!('receiptFooter' in data) || (data.receiptFooter is string && data.receiptFooter.size() <= 300)) &&
+        (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() <= 200000)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'name', 'barcode', 'category', 'vertical', 'costPrice', 'retailPrice', 'stockQuantity', 'minStockAlert', 'unit', 'taxPercent', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'name', 'urduName', 'barcode', 'category', 'vertical', 'costPrice', 'retailPrice', 'stockQuantity', 'minStockAlert', 'unit', 'taxPercent', 'size', 'color', 'imageId', 'colorVariants', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        (!('urduName' in data) || (data.urduName is string && data.urduName.size() <= 200)) &&
+        data.barcode is string && data.barcode.size() <= 64 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        data.vertical is string && data.vertical.size() >= 1 && data.vertical.size() <= 64 &&
+        data.costPrice is number && data.costPrice >= 0 &&
+        data.retailPrice is number && data.retailPrice >= 0 &&
+        data.stockQuantity is number &&
+        data.minStockAlert is number && data.minStockAlert >= 0 &&
+        data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 32 &&
+        data.taxPercent is number && data.taxPercent >= 0 && data.taxPercent <= 100 &&
+        (!('size' in data) || (data.size is string && data.size.size() <= 64)) &&
+        (!('color' in data) || (data.color is string && data.color.size() <= 64)) &&
+        (!('imageId' in data) || (data.imageId is string && data.imageId.size() <= 128)) &&
+        (!('colorVariants' in data) || (data.colorVariants is list && data.colorVariants.size() <= 20 && (data.colorVariants.size() == 0 || data.colorVariants[0] is map))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSale(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'invoiceNo', 'customerName', 'items', 'subtotal', 'discountAmount', 'taxAmount', 'grandTotal', 'profit', 'paymentMethod', 'status', 'timestamp', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'invoiceNo', 'customerName', 'customerPhone', 'items', 'subtotal', 'discountAmount', 'taxAmount', 'grandTotal', 'profit', 'paymentMethod', 'status', 'timestamp', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.invoiceNo is string && data.invoiceNo.size() >= 1 && data.invoiceNo.size() <= 64 &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 160 &&
+        (!('customerPhone' in data) || (data.customerPhone is string && data.customerPhone.size() <= 40)) &&
+        data.items is list && data.items.size() >= 1 && data.items.size() <= 100 && data.items[0] is map &&
+        data.subtotal is number && data.subtotal >= 0 &&
+        data.discountAmount is number && data.discountAmount >= 0 &&
+        data.taxAmount is number && data.taxAmount >= 0 &&
+        data.grandTotal is number && data.grandTotal >= 0 &&
+        data.profit is number &&
+        data.paymentMethod in ['cash', 'jazzcash', 'easypaisa', 'card', 'bank_transfer', 'split', 'udhar'] &&
+        data.status in ['completed', 'refunded', 'void'] &&
+        data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 64 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCustomerKhata(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'customerName', 'phone', 'creditLimit', 'currentBalance', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'customerName', 'phone', 'creditLimit', 'currentBalance', 'transactions', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 40 &&
+        data.creditLimit is number && data.creditLimit >= 0 &&
+        data.currentBalance is number &&
+        (!('transactions' in data) || (data.transactions is list && data.transactions.size() <= 200 && (data.transactions.size() == 0 || data.transactions[0] is map))) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'name', 'phone', 'totalPurchased', 'totalPaid', 'balanceDue', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'name', 'contactPerson', 'phone', 'city', 'totalPurchased', 'totalPaid', 'balanceDue', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        (!('contactPerson' in data) || (data.contactPerson is string && data.contactPerson.size() <= 120)) &&
+        data.phone is string && data.phone.size() <= 40 &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        data.totalPurchased is number && data.totalPurchased >= 0 &&
+        data.totalPaid is number && data.totalPaid >= 0 &&
+        data.balanceDue is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'title', 'category', 'amount', 'paymentMethod', 'date', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'title', 'category', 'amount', 'paymentMethod', 'date', 'notes', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.amount is number && data.amount >= 0 &&
+        data.paymentMethod is string && data.paymentMethod.size() >= 1 && data.paymentMethod.size() <= 40 &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 40 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidReturnRecord(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'saleId', 'invoiceNo', 'customerName', 'totalRefundAmount', 'date', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'saleId', 'invoiceNo', 'customerName', 'totalRefundAmount', 'reason', 'date', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.saleId is string && data.saleId.size() >= 1 && data.saleId.size() <= 128 &&
+        data.invoiceNo is string && data.invoiceNo.size() >= 1 && data.invoiceNo.size() <= 64 &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 160 &&
+        data.totalRefundAmount is number && data.totalRefundAmount >= 0 &&
+        (!('reason' in data) || (data.reason is string && data.reason.size() <= 300)) &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 40 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidStaffMember(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'name', 'email', 'role', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'name', 'email', 'role', 'isActive', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.role in ['admin', 'manager', 'cashier', 'staff'] &&
+        data.isActive is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'storeId', 'actorEmail', 'actorRole', 'category', 'action', 'details', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'storeId', 'actorEmail', 'actorRole', 'category', 'action', 'details', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerId) &&
+        isValidId(data.storeId) &&
+        data.actorEmail is string && data.actorEmail.size() >= 1 && data.actorEmail.size() <= 200 &&
+        data.actorRole is string && data.actorRole.size() >= 1 && data.actorRole.size() <= 40 &&
+        data.category in ['sale', 'inventory', 'auth', 'store', 'finance', 'sync'] &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 160 &&
+        data.details is string && data.details.size() <= 400 &&
+        data.createdAt is timestamp;
+    }
+
+    // =========================================================================
+    // ADMIN REGISTRY (Read-Only for Self, No Client Writes)
+    // =========================================================================
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && isOwner(adminId);
+      allow list, write: if false;
+    }
+
+    // =========================================================================
+    // USER PROFILES (Strict Owner PII Isolation)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isVerified() && isValidId(userId) && isOwner(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().role == 'owner' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isVerified() && isValidId(userId) &&
+        isValidUserProfile(incoming()) && (
+          isAdmin() ||
+          (isOwner(userId) &&
+            incoming().uid == existing().uid &&
+            incoming().role == existing().role &&
+            incoming().createdAt == existing().createdAt &&
+            incoming().updatedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'activeStoreId', 'updatedAt']))
+        );
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // STORES & MULTI-TENANT SUBCOLLECTIONS
+    // =========================================================================
+    match /stores/{storeId} {
+      allow get: if isSignedIn() && isValidId(storeId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isVerified() && isValidId(storeId) &&
+        isValidStore(incoming()) &&
+        incoming().id == storeId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isVerified() && isValidId(storeId) &&
+        isValidStore(incoming()) && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+            incoming().id == existing().id &&
+            incoming().ownerId == existing().ownerId &&
+            incoming().createdAt == existing().createdAt &&
+            incoming().updatedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'storeName', 'currency', 'taxRate', 'vertical', 'phone', 'address', 'city', 'receiptFooter', 'logoUrl', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && (existing().ownerId == request.auth.uid || isAdmin());
+
+      // Products Subcollection
+      match /products/{productId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(productId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(productId) &&
+          isValidProduct(incoming()) &&
+          incoming().id == productId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(productId) &&
+          isValidProduct(incoming()) && (
+            isAdmin() ||
+            (existing().ownerId == request.auth.uid &&
+              incoming().id == existing().id &&
+              incoming().ownerId == existing().ownerId &&
+              incoming().storeId == existing().storeId &&
+              incoming().createdAt == existing().createdAt &&
+              incoming().updatedAt == request.time &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'urduName', 'barcode', 'category', 'vertical', 'costPrice', 'retailPrice', 'stockQuantity', 'minStockAlert', 'unit', 'taxPercent', 'size', 'color', 'imageId', 'colorVariants', 'updatedAt']) &&
+              isStoreOwner(storeId))
+          );
+        allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(productId) && ((existing().ownerId == request.auth.uid && isStoreOwner(storeId)) || isAdmin());
+      }
+
+      // Sales Subcollection (With Terminal State Locking)
+      match /sales/{saleId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(saleId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(saleId) &&
+          isValidSale(incoming()) &&
+          incoming().id == saleId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().status == 'completed' &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(saleId) &&
+          isValidSale(incoming()) && (
+            isAdmin() ||
+            (existing().ownerId == request.auth.uid &&
+              existing().status == 'completed' &&
+              incoming().status in ['refunded', 'void'] &&
+              incoming().id == existing().id &&
+              incoming().ownerId == existing().ownerId &&
+              incoming().storeId == existing().storeId &&
+              incoming().createdAt == existing().createdAt &&
+              incoming().updatedAt == request.time &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+              isStoreOwner(storeId))
+          );
+        allow delete: if isAdmin();
+      }
+
+      // Customers & Udhar Khatta Subcollection
+      match /customers/{customerId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(customerId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(customerId) &&
+          isValidCustomerKhata(incoming()) &&
+          incoming().id == customerId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(customerId) &&
+          isValidCustomerKhata(incoming()) && (
+            isAdmin() ||
+            (existing().ownerId == request.auth.uid &&
+              incoming().id == existing().id &&
+              incoming().ownerId == existing().ownerId &&
+              incoming().storeId == existing().storeId &&
+              incoming().createdAt == existing().createdAt &&
+              incoming().updatedAt == request.time &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['customerName', 'phone', 'creditLimit', 'currentBalance', 'transactions', 'updatedAt']) &&
+              isStoreOwner(storeId))
+          );
+        allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(customerId) && ((existing().ownerId == request.auth.uid && isStoreOwner(storeId)) || isAdmin());
+      }
+
+      // Suppliers Subcollection
+      match /suppliers/{supplierId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(supplierId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(supplierId) &&
+          isValidSupplier(incoming()) &&
+          incoming().id == supplierId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(supplierId) &&
+          isValidSupplier(incoming()) && (
+            isAdmin() ||
+            (existing().ownerId == request.auth.uid &&
+              incoming().id == existing().id &&
+              incoming().ownerId == existing().ownerId &&
+              incoming().storeId == existing().storeId &&
+              incoming().createdAt == existing().createdAt &&
+              incoming().updatedAt == request.time &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'contactPerson', 'phone', 'city', 'totalPurchased', 'totalPaid', 'balanceDue', 'updatedAt']) &&
+              isStoreOwner(storeId))
+          );
+        allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(supplierId) && ((existing().ownerId == request.auth.uid && isStoreOwner(storeId)) || isAdmin());
+      }
+
+      // Expenses Subcollection
+      match /expenses/{expenseId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(expenseId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(expenseId) &&
+          isValidExpense(incoming()) &&
+          incoming().id == expenseId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if false;
+        allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(expenseId) && ((existing().ownerId == request.auth.uid && isStoreOwner(storeId)) || isAdmin());
+      }
+
+      // Returns Subcollection
+      match /returns/{returnId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(returnId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(returnId) &&
+          isValidReturnRecord(incoming()) &&
+          incoming().id == returnId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          isStoreOwner(storeId);
+        allow update, delete: if isAdmin();
+      }
+
+      // Staff Roles Subcollection
+      match /staff/{staffId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(staffId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(staffId) &&
+          isValidStaffMember(incoming()) &&
+          incoming().id == staffId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isStoreOwner(storeId);
+        allow update: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(staffId) &&
+          isValidStaffMember(incoming()) && (
+            isAdmin() ||
+            (existing().ownerId == request.auth.uid &&
+              incoming().id == existing().id &&
+              incoming().ownerId == existing().ownerId &&
+              incoming().storeId == existing().storeId &&
+              incoming().createdAt == existing().createdAt &&
+              incoming().updatedAt == request.time &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'role', 'isActive', 'updatedAt']) &&
+              isStoreOwner(storeId))
+          );
+        allow delete: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(staffId) && ((existing().ownerId == request.auth.uid && isStoreOwner(storeId)) || isAdmin());
+      }
+
+      // Activity Logs Subcollection (Append-Only Audit Trail)
+      match /activityLogs/{logId} {
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(logId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+        allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(logId) &&
+          isValidActivityLog(incoming()) &&
+          incoming().id == logId &&
+          incoming().storeId == storeId &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          isStoreOwner(storeId);
+        allow update, delete: if isAdmin();
+      }
+    }
+  }
+}

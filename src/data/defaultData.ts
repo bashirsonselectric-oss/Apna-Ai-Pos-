@@ -1,3 +1,4 @@
+import { PRODUCT_PRESET_IMAGES } from '../lib/productThumbnails';
 import {
   BusinessVertical,
   VerticalConfig,
@@ -778,7 +779,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     unit: 'coil',
     taxPercent: 0,
     // Exact features requested: Image, Color, Size, Dual Pack (Coil) + Loose Meter breakdown, 7-color set
-    image: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=400',
+    image: PRODUCT_PRESET_IMAGES.cableRed,
     color: 'Red',
     size: '3/29',
     packUnit: 'coil',
@@ -828,7 +829,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     minStockAlert: 3,
     unit: 'coil',
     taxPercent: 0,
-    image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=400',
+    image: PRODUCT_PRESET_IMAGES.wireBlack,
     color: 'Black',
     size: '7/29',
     packUnit: 'coil',
@@ -1153,7 +1154,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     minStockAlert: 5,
     unit: 'suit',
     taxPercent: 0,
-    image: 'https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?auto=format&fit=crop&q=80&w=600',
+    image: PRODUCT_PRESET_IMAGES.fabricSuit,
     color: 'Slate Grey',
     size: '4.5 Meter (Suit)',
     options: {
@@ -1193,7 +1194,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     minStockAlert: 8,
     unit: 'pcs',
     taxPercent: 0,
-    image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&q=80&w=600',
+    image: PRODUCT_PRESET_IMAGES.poloGarment,
     color: 'Navy Blue',
     size: 'L',
     options: {

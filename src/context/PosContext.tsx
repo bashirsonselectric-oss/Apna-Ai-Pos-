@@ -81,6 +81,48 @@ import {
 } from '../data/defaultData';
 import { sounds } from '../services/soundService';
 import { BillParseResult } from '../services/geminiService';
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+} from 'firebase/auth';
+import { auth, googleAuthProvider, SUPER_ADMIN_EMAIL } from '../lib/firebase';
+import { offlineDb, sanitizeFirestoreId } from '../lib/offlineDb';
+import {
+  ActivityLogEntry,
+  ensureCloudUserProfile,
+  upsertCloudStore,
+  syncProductToCloud,
+  syncActivityLogToCloud,
+} from '../lib/firestoreSync';
+import { backgroundSyncService } from '../lib/backgroundSyncService';
+import {
+  BOUTIQUE_FEATURED_PRODUCTS,
+  BOUTIQUE_COUPONS,
+  BoutiqueCoupon,
+} from '../data/boutiqueCatalog';
+
+export interface HeldOrder {
+  id: string;
+  createdAt: string;
+  customerName: string;
+  note?: string;
+  items: CartItem[];
+  discount: number;
+  taxRate: number;
+  couponCode?: string | null;
+  subtotal: number;
+}
+
+export interface PosSelectedCustomer {
+  id: string;
+  name: string;
+  phone: string;
+  points: number;
+}
 
 interface PosContextType {
   // Theme
@@ -118,8 +160,27 @@ interface PosContextType {
   cart: CartItem[];
   addToCart: (product: Product, qty?: number, options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }) => void;
   removeFromCart: (productId: string) => void;
+  removeCartItemAt: (index: number) => void;
   updateCartQuantity: (productId: string, qty: number) => void;
+  updateCartItemAt: (
+    index: number,
+    patch: { quantity?: number; selectedColor?: string; selectedSize?: string; discount?: number }
+  ) => void;
   clearCart: () => void;
+  heldOrders: HeldOrder[];
+  holdCurrentOrder: (customerName?: string, note?: string) => HeldOrder | null;
+  resumeHeldOrder: (orderId: string) => void;
+  deleteHeldOrder: (orderId: string) => void;
+  selectedPosCustomer: PosSelectedCustomer | null;
+  setSelectedPosCustomer: (customer: PosSelectedCustomer | null) => void;
+  loyaltyPointsMap: Record<string, number>;
+  redeemLoyaltyPoints: (customerKey: string, pointsToRedeem: number) => number;
+  coupons: BoutiqueCoupon[];
+  addCoupon: (coupon: BoutiqueCoupon) => void;
+  toggleCouponActive: (code: string) => void;
+  deleteCoupon: (code: string) => void;
+  appliedCouponCode: string | null;
+  setAppliedCouponCode: (code: string | null) => void;
   cartDiscount: number;
   setCartDiscount: (disc: number) => void;
   cartTaxRate: number;
@@ -155,6 +216,8 @@ interface PosContextType {
     riderName?: string;
     taxRate?: number;
     taxAmount?: number;
+    redeemedPoints?: number;
+    openReceipt?: boolean;
   }) => SaleRecord;
   currentReceipt: SaleRecord | null;
   setCurrentReceipt: (receipt: SaleRecord | null) => void;
@@ -323,10 +386,20 @@ interface PosContextType {
   userSession: UserSession;
   setUserSession: React.Dispatch<React.SetStateAction<UserSession>>;
   googleSignIn: (email: string, displayName: string) => void;
+  firebaseSignInWithGoogle: () => Promise<{ success: boolean; message?: string }>;
   googleSignOut: () => void;
   changeUserPassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
   resetAllData: () => void;
   loadDemoSampleData: () => void;
+
+  // Store-Scoped Activity Logs
+  activityLogs: ActivityLogEntry[];
+  logActivity: (
+    category: ActivityLogEntry['category'],
+    action: string,
+    details: string
+  ) => void;
+  pendingSyncCount: number;
 
   // Staff Attendance / Haazri Tracking
   attendanceRecords: AttendanceRecord[];
@@ -379,13 +452,14 @@ interface PosContextType {
 const PosContext = createContext<PosContextType | null>(null);
 
 export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Theme state: defaults to dark mode
+  // Theme state: defaults to Commercial Light Mode with Refined Dark Mode toggle
   const [theme, setTheme] = useState<ThemeMode>(() => {
     try {
       const saved = localStorage.getItem('apna_pos_theme');
-      return (saved as ThemeMode) || 'dark';
+      if (saved === 'light' || saved === 'dark') return saved;
+      return 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
@@ -428,36 +502,48 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getStorageKey = (key: string) => `apna_pos_${activeBusinessId}_${key}`;
   const isDemoTenant = false;
 
-  // Products (Demo business biz-1 has initial catalog across verticals; new tenants start clean)
+  // Products (Ensure Luxury Fashion Boutique catalog is seeded alongside existing vertical items)
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_products`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (activeBusinessId === 'biz-1' && Array.isArray(parsed)) {
+        if (Array.isArray(parsed)) {
           const existingIds = new Set(parsed.map((p: any) => p.id));
-          const missing = INITIAL_PRODUCTS.filter((ip) => !existingIds.has(ip.id));
-          if (missing.length > 0) {
-            const merged = [...parsed, ...missing];
+          const missingBoutique = BOUTIQUE_FEATURED_PRODUCTS.filter((bp) => !existingIds.has(bp.id));
+          const missingDefault =
+            activeBusinessId === 'biz-1'
+              ? INITIAL_PRODUCTS.filter((ip) => !existingIds.has(ip.id))
+              : [];
+          if (missingBoutique.length > 0 || missingDefault.length > 0) {
+            const merged = [...missingBoutique, ...parsed, ...missingDefault];
             localStorage.setItem(`apna_pos_${activeBusinessId}_products`, JSON.stringify(merged));
             return merged;
           }
+          return parsed;
         }
-        return parsed;
       }
-      return activeBusinessId === 'biz-1' ? INITIAL_PRODUCTS : [];
+      return activeBusinessId === 'biz-1'
+        ? [...BOUTIQUE_FEATURED_PRODUCTS, ...INITIAL_PRODUCTS]
+        : [...BOUTIQUE_FEATURED_PRODUCTS];
     } catch {
-      return activeBusinessId === 'biz-1' ? INITIAL_PRODUCTS : [];
+      return [...BOUTIQUE_FEATURED_PRODUCTS, ...INITIAL_PRODUCTS];
     }
   });
 
-  // Active Vertical
+  // Active Vertical (Default to Fashion Boutique / clothing_apparel on first upgrade launch; user can switch anytime)
   const [activeVertical, setActiveVertical] = useState<BusinessVertical>(() => {
     try {
+      const migrated = localStorage.getItem('apna_pos_boutique_v1_migrated');
+      if (!migrated) {
+        localStorage.setItem('apna_pos_boutique_v1_migrated', 'true');
+        localStorage.setItem(`apna_pos_${activeBusinessId}_vertical`, 'clothing_apparel');
+        return 'clothing_apparel';
+      }
       const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_vertical`);
-      return (saved as BusinessVertical) || 'electrical_hardware';
+      return (saved as BusinessVertical) || 'clothing_apparel';
     } catch {
-      return 'electrical_hardware';
+      return 'clothing_apparel';
     }
   });
 
@@ -1081,6 +1167,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
     }
     if (effectiveRole === 'admin') return true;
+    if (tabId === 'categories' || tabId === 'promotions') return true;
     const config = rolePermissions[effectiveRole];
     if (!config) return true;
     return config.allowedTabs.includes(tabId);
@@ -1353,8 +1440,130 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(`apna_pos_${newId}_offline_queue`, JSON.stringify([]));
 
     switchBusinessAccount(newId, newBiz);
+    void upsertCloudStore(newBiz, 0, storeProfile.receiptFooter || '');
     return newBiz;
   };
+
+  // Store-scoped Activity & Audit Logs
+  const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_activity_logs`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+
+  const logActivity = (
+    category: ActivityLogEntry['category'],
+    action: string,
+    details: string
+  ) => {
+    const ownerId = sanitizeFirestoreId(auth.currentUser?.uid || userSession.email || 'local');
+    const entry: ActivityLogEntry = {
+      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      ownerId,
+      storeId: activeBusinessId,
+      actorEmail: userSession.email || 'system',
+      actorRole: effectiveRole || userSession.role || 'owner',
+      category,
+      action,
+      details,
+      timestamp: new Date().toISOString(),
+    };
+    setActivityLogs((prev) => {
+      const next = [entry, ...prev].slice(0, 200);
+      try {
+        localStorage.setItem(`apna_pos_${activeBusinessId}_activity_logs`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    void syncActivityLogToCloud(entry);
+  };
+
+  // Real Firebase Google Sign-In via Popup (Required for iframe allowlist compatibility)
+  const firebaseSignInWithGoogle = async (): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const cred = await signInWithPopup(auth, googleAuthProvider);
+      const fbUser = cred.user;
+      const email = (fbUser.email || '').toLowerCase().trim();
+      const displayName = fbUser.displayName || email.split('@')[0] || 'Shop Owner';
+      googleSignIn(email, displayName);
+      setUserSession((prev) => ({
+        ...prev,
+        email,
+        displayName,
+        photoURL: fbUser.photoURL || prev.photoURL,
+        isGoogleSignedIn: true,
+        isAuthenticated: true,
+      }));
+      localStorage.setItem('apna_pos_onboarded', 'true');
+      await offlineDb.saveCachedSession({
+        uid: fbUser.uid,
+        email,
+        displayName,
+        photoURL: fbUser.photoURL || undefined,
+        role: email === SUPER_ADMIN_EMAIL ? 'admin' : 'owner',
+        activeStoreId: activeBusinessId,
+        lastVerifiedAt: new Date().toISOString(),
+      });
+      void ensureCloudUserProfile(displayName, activeBusinessId).catch(() => {});
+      logActivity('auth', 'Google Sign-In', `Authenticated ${email} via Firebase Auth`);
+      return { success: true };
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/popup-closed-by-user') {
+        return { success: false, message: 'Sign-in popup was closed before completing.' };
+      }
+      return { success: false, message: err?.message || 'Google Sign-In failed.' };
+    }
+  };
+
+  // Sync Firebase Auth state changes across page reloads
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser && fbUser.email) {
+        const email = fbUser.email.toLowerCase().trim();
+        const displayName = fbUser.displayName || email.split('@')[0] || 'Shop Owner';
+        await offlineDb.saveCachedSession({
+          uid: fbUser.uid,
+          email,
+          displayName,
+          photoURL: fbUser.photoURL || undefined,
+          role: email === SUPER_ADMIN_EMAIL ? 'admin' : 'owner',
+          activeStoreId: activeBusinessId,
+          lastVerifiedAt: new Date().toISOString(),
+        });
+        const pending = await offlineDb.getPendingSyncItems(sanitizeFirestoreId(fbUser.uid));
+        setPendingSyncCount(pending.length);
+      }
+    });
+    return () => unsub();
+  }, [activeBusinessId]);
+
+  // Reload activity logs when switching stores
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_activity_logs`);
+      setActivityLogs(saved ? JSON.parse(saved) : []);
+    } catch {
+      setActivityLogs([]);
+    }
+  }, [activeBusinessId]);
+
+  // Persist lightweight store snapshot into IndexedDB for offline resilience
+  useEffect(() => {
+    if (!userSession.isAuthenticated) return;
+    const ownerId = sanitizeFirestoreId(auth.currentUser?.uid || userSession.email || 'local');
+    void offlineDb.saveStoreSnapshot(ownerId, activeBusinessId, {
+      productsCount: products.length,
+      salesCount: sales.length,
+      storeName: storeProfile.name,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [products.length, sales.length, activeBusinessId, storeProfile.name, userSession.isAuthenticated, userSession.email]);
 
   // Google Sign In / Sign Out (Creates 0-data store for new Google accounts)
   const googleSignIn = (email: string, displayName: string) => {
@@ -1410,12 +1619,15 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const googleSignOut = () => {
+    logActivity('auth', 'User Signed Out', `${userSession.email} signed out of POS session`);
+    void firebaseSignOut(auth).catch(() => {});
     setUserSession({
       email: 'guest@apnapos.local',
       displayName: 'Guest Cashier',
       role: 'cashier',
       storeId: activeBusinessId,
       isGoogleSignedIn: false,
+      isAuthenticated: false,
       permissions: {
         canDiscount: false,
         canEditPrices: false,
@@ -1572,8 +1784,88 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Held Orders, Boutique Coupons & Customer Loyalty Points (persisted per store)
+  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_held_orders`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [coupons, setCoupons] = useState<BoutiqueCoupon[]>(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_coupons`);
+      return saved ? JSON.parse(saved) : BOUTIQUE_COUPONS;
+    } catch {
+      return BOUTIQUE_COUPONS;
+    }
+  });
+
+  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
+  const [selectedPosCustomer, setSelectedPosCustomer] = useState<PosSelectedCustomer | null>(null);
+
+  const [loyaltyPointsMap, setLoyaltyPointsMap] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_loyalty_points`);
+      if (saved) return JSON.parse(saved);
+      return {
+        'Ayesha Siddiqui': 480,
+        'Zara Mansoor': 820,
+        'Hina Tariq': 310,
+      };
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`apna_pos_${activeBusinessId}_held_orders`, JSON.stringify(heldOrders));
+    } catch {}
+  }, [heldOrders, activeBusinessId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`apna_pos_${activeBusinessId}_coupons`, JSON.stringify(coupons));
+    } catch {}
+  }, [coupons, activeBusinessId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`apna_pos_${activeBusinessId}_loyalty_points`, JSON.stringify(loyaltyPointsMap));
+    } catch {}
+  }, [loyaltyPointsMap, activeBusinessId]);
+
+  const addCoupon = (coupon: BoutiqueCoupon) => {
+    setCoupons((prev) => [coupon, ...prev.filter((c) => c.code.toUpperCase() !== coupon.code.toUpperCase())]);
+  };
+
+  const toggleCouponActive = (code: string) => {
+    setCoupons((prev) =>
+      prev.map((c) => (c.code === code ? { ...c, active: !c.active } : c))
+    );
+  };
+
+  const deleteCoupon = (code: string) => {
+    setCoupons((prev) => prev.filter((c) => c.code !== code));
+  };
+
+  const redeemLoyaltyPoints = (customerKey: string, pointsToRedeem: number): number => {
+    const current = loyaltyPointsMap[customerKey] || 0;
+    const actual = Math.max(0, Math.min(current, pointsToRedeem));
+    if (actual <= 0) return 0;
+    setLoyaltyPointsMap((prev) => ({ ...prev, [customerKey]: Math.max(0, (prev[customerKey] || 0) - actual) }));
+    return actual;
+  };
+
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  };
+
+  const removeCartItemAt = (index: number) => {
+    setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
   const updateCartQuantity = (productId: string, qty: number) => {
@@ -1594,9 +1886,36 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const updateCartItemAt = (
+    index: number,
+    patch: { quantity?: number; selectedColor?: string; selectedSize?: string; discount?: number }
+  ) => {
+    if (patch.quantity !== undefined && patch.quantity <= 0) {
+      removeCartItemAt(index);
+      return;
+    }
+    setCart((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const nextQty = patch.quantity !== undefined ? patch.quantity : item.quantity;
+        const nextDisc = patch.discount !== undefined ? patch.discount : item.discount;
+        return {
+          ...item,
+          quantity: nextQty,
+          selectedColor: patch.selectedColor !== undefined ? patch.selectedColor : item.selectedColor,
+          selectedSize: patch.selectedSize !== undefined ? patch.selectedSize : item.selectedSize,
+          discount: nextDisc,
+          subtotal: Math.max(0, nextQty * item.unitPrice - nextDisc),
+        };
+      })
+    );
+  };
+
   const clearCart = () => {
     setCart([]);
     setCartDiscount(0);
+    setAppliedCouponCode(null);
+    setSelectedPosCustomer(null);
     setCartDeliveryFee(0);
     setCartDeliveryType('none');
     setCartDeliveryAddress('');
@@ -1608,6 +1927,40 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const cartTaxAmount = Math.round(Math.max(0, cartSubtotal - cartDiscountAmount) * (cartTaxRate / 100));
   const cartGrandTotal = Math.max(0, cartSubtotal - cartDiscountAmount + cartTaxAmount + cartDeliveryFee);
   const hasZeroStockInCart = cart.some((item) => (item.product.stockQuantity || 0) <= 0);
+
+  const holdCurrentOrder = (customerName?: string, note?: string): HeldOrder | null => {
+    if (cart.length === 0) return null;
+    const held: HeldOrder = {
+      id: `hold-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      customerName: customerName || selectedPosCustomer?.name || 'Walk-in Guest',
+      note,
+      items: [...cart],
+      discount: cartDiscount,
+      taxRate: cartTaxRate,
+      couponCode: appliedCouponCode,
+      subtotal: cartSubtotal,
+    };
+    setHeldOrders((prev) => [held, ...prev]);
+    clearCart();
+    sounds.playScanBeep();
+    return held;
+  };
+
+  const resumeHeldOrder = (orderId: string) => {
+    const found = heldOrders.find((h) => h.id === orderId);
+    if (!found) return;
+    setCart(found.items);
+    setCartDiscount(found.discount || 0);
+    setCartTaxRate(found.taxRate || 0);
+    setAppliedCouponCode(found.couponCode || null);
+    setHeldOrders((prev) => prev.filter((h) => h.id !== orderId));
+    sounds.playScanBeep();
+  };
+
+  const deleteHeldOrder = (orderId: string) => {
+    setHeldOrders((prev) => prev.filter((h) => h.id !== orderId));
+  };
 
   // Complete checkout (including Udhar Khatta debit, delivery, and tax)
   const completeSale = (paymentInfo: {
@@ -1625,6 +1978,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     riderName?: string;
     taxRate?: number;
     taxAmount?: number;
+    redeemedPoints?: number;
+    openReceipt?: boolean;
   }): SaleRecord => {
     // Strict business rule: 0-stock items can ONLY be added on an Estimate / Quotation!
     if (hasZeroStockInCart) {
@@ -1688,6 +2043,46 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    // Write-ahead cache sale in IndexedDB and push to Firestore (auto-queues when offline or on transient drops)
+    const activeBiz = businessAccounts.find((b) => b.id === activeBusinessId);
+    void backgroundSyncService
+      .cacheAndSyncSale(
+        activeBusinessId,
+        saleRecord,
+        {
+          businessName: activeBiz?.businessName || storeProfile.name,
+          currency: activeBiz?.currency || storeProfile.currency || 'Rs.',
+          vertical: activeBiz?.vertical || activeVertical,
+          phone: activeBiz?.phone || storeProfile.phone,
+          city: activeBiz?.city,
+        },
+        currentIsOffline
+      )
+      .then((res) => {
+        if (!res.syncedImmediately && !currentIsOffline) {
+          // Live push fell back to IndexedDB offline cache (e.g. brief network drop)
+          setSales((prev) =>
+            prev.map((s) =>
+              s.id === saleRecord.id
+                ? { ...s, isOfflineSale: true, isOfflineSyncPending: true, syncedAt: undefined }
+                : s
+            )
+          );
+          setOfflineSalesQueue((prev) => {
+            if (prev.some((q) => q.id === saleRecord.id)) return prev;
+            const next = [saleRecord, ...prev];
+            localStorage.setItem(`apna_pos_${activeBusinessId}_offline_queue`, JSON.stringify(next));
+            return next;
+          });
+        }
+      })
+      .catch(() => {});
+    logActivity(
+      'sale',
+      `Completed Bill ${invoiceNo}`,
+      `${paymentInfo.customerName || 'Walk-in'} • ${storeProfile.currency} ${cartGrandTotal.toLocaleString()} (${paymentInfo.paymentMethod})`
+    );
+
     // If payment method is Udhar -> automatically post transaction to customer Khata!
     if (paymentInfo.paymentMethod === 'udhar' && paymentInfo.udharKhataId) {
       addKhataTransaction(paymentInfo.udharKhataId, {
@@ -1698,14 +2093,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Deduct stock
+    // Deduct stock across all variant lines in cart
     setProducts((prev) =>
       prev.map((prod) => {
-        const inCart = cart.find((c) => c.product.id === prod.id);
-        if (inCart) {
+        const totalQty = cart
+          .filter((c) => c.product.id === prod.id)
+          .reduce((sum, c) => sum + c.quantity, 0);
+        if (totalQty > 0) {
           return {
             ...prod,
-            stockQuantity: Math.max(0, prod.stockQuantity - inCart.quantity),
+            stockQuantity: Math.max(0, prod.stockQuantity - totalQty),
             lastUpdated: new Date().toISOString().split('T')[0],
           };
         }
@@ -1786,9 +2183,22 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    // Award Customer Loyalty Points (1 point per 100 spent) & deduct redeemed points
+    const customerKey = (paymentInfo.customerName || '').trim();
+    if (customerKey && customerKey !== 'Walk-in Customer' && customerKey !== 'Walk-in Guest') {
+      const earnedPoints = Math.floor(cartGrandTotal / 100);
+      const redeemed = Math.max(0, paymentInfo.redeemedPoints || 0);
+      setLoyaltyPointsMap((prev) => ({
+        ...prev,
+        [customerKey]: Math.max(0, (prev[customerKey] || 0) - redeemed + earnedPoints),
+      }));
+    }
+
     sounds.playCheckoutChime();
     clearCart();
-    setCurrentReceipt(saleRecord);
+    if (paymentInfo.openReceipt !== false) {
+      setCurrentReceipt(saleRecord);
+    }
 
     return saleRecord;
   };
@@ -1981,21 +2391,30 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastUpdated: new Date().toISOString().split('T')[0],
     };
     setProducts((prev) => [product, ...prev]);
+    void syncProductToCloud(activeBusinessId, product, 'upsert').catch(() => {});
+    logActivity('inventory', 'Added Product', `${product.name} (${storeProfile.currency} ${product.retailPrice})`);
     return product;
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
     setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? { ...p, ...updates, lastUpdated: new Date().toISOString().split('T')[0] }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, ...updates, lastUpdated: new Date().toISOString().split('T')[0] };
+        void syncProductToCloud(activeBusinessId, updated, 'upsert').catch(() => {});
+        return updated;
+      })
     );
+    logActivity('inventory', 'Updated Product', `Updated item ${updates.name || id}`);
   };
 
   const deleteProduct = (id: string) => {
+    const target = products.find((p) => p.id === id);
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    if (target) {
+      void syncProductToCloud(activeBusinessId, target, 'delete').catch(() => {});
+      logActivity('inventory', 'Deleted Product', `Removed ${target.name} from catalog`);
+    }
   };
 
   const batchImportProducts = (items: Partial<Product>[]): number => {
@@ -2746,66 +3165,157 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  // ---------------- OFFLINE SALES SYNC ENGINE ----------------
+  // ---------------- OFFLINE SALES BACKGROUND SYNC ENGINE ----------------
   const syncOfflineSales = async (): Promise<{ success: boolean; count: number; message?: string }> => {
     setIsSyncing(true);
     try {
-      const res = await fetch('/api/pos/sync-offline-sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sales: offlineSalesQueue,
-          businessId: activeBusinessId,
-          cartCount: cart.length,
-          totalSalesRecorded: sales.length,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        const timestamp = data.serverTimestamp || new Date().toISOString();
-        const syncedIds = new Set(data.syncedIds || offlineSalesQueue.map((s) => s.id));
-
-        if (offlineSalesQueue.length > 0) {
-          // Mark corresponding sales as synced
-          setSales((prev) =>
-            prev.map((s) =>
-              syncedIds.has(s.id)
-                ? { ...s, isOfflineSyncPending: false, syncedAt: timestamp }
-                : s
-            )
-          );
-          setOfflineSalesQueue([]);
-          localStorage.removeItem(`apna_pos_${activeBusinessId}_offline_queue`);
+      // 1. Ensure any legacy localStorage-queued sales are also persisted in IndexedDB
+      const activeBiz = businessAccounts.find((b) => b.id === activeBusinessId);
+      const storeMeta = {
+        businessName: activeBiz?.businessName || storeProfile.name,
+        currency: activeBiz?.currency || storeProfile.currency || 'Rs.',
+        vertical: activeBiz?.vertical || activeVertical,
+        phone: activeBiz?.phone || storeProfile.phone,
+        city: activeBiz?.city,
+      };
+      for (const queuedSale of offlineSalesQueue) {
+        const existing = await offlineDb.getOfflineSale(sanitizeFirestoreId(queuedSale.id));
+        if (!existing) {
+          await backgroundSyncService.cacheAndSyncSale(activeBusinessId, queuedSale, storeMeta, true);
         }
+      }
 
-        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setLastSyncTime(nowStr);
-        localStorage.setItem(`apna_pos_${activeBusinessId}_last_sync`, nowStr);
+      // 2. Run BackgroundSyncService (IndexedDB -> Cloud Firestore)
+      const bgRes = await backgroundSyncService.syncNow('manual');
+      let syncedCount = bgRes.syncedSales + bgRes.syncedOther;
+      const syncedIdSet = new Set<string>(bgRes.syncedSaleIds);
+
+      // 3. Reconcile synced sales in React state & localStorage queue
+      if (syncedIdSet.size > 0) {
+        const timestamp = new Date().toISOString();
+        setSales((prev) =>
+          prev.map((s) =>
+            syncedIdSet.has(s.id) || syncedIdSet.has(sanitizeFirestoreId(s.id))
+              ? { ...s, isOfflineSyncPending: false, syncedAt: timestamp }
+              : s
+          )
+        );
+        setOfflineSalesQueue((prev) => {
+          const remaining = prev.filter(
+            (s) => !syncedIdSet.has(s.id) && !syncedIdSet.has(sanitizeFirestoreId(s.id))
+          );
+          if (remaining.length === 0) {
+            localStorage.removeItem(`apna_pos_${activeBusinessId}_offline_queue`);
+          } else {
+            localStorage.setItem(`apna_pos_${activeBusinessId}_offline_queue`, JSON.stringify(remaining));
+          }
+          return remaining;
+        });
+      }
+
+      // 4. Optional local backend ledger ping when online
+      if (navigator.onLine && !isOffline && offlineSalesQueue.length > 0 && bgRes.skippedReason === 'unauthenticated') {
+        try {
+          const res = await fetch('/api/pos/sync-offline-sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sales: offlineSalesQueue,
+              businessId: activeBusinessId,
+              cartCount: cart.length,
+              totalSalesRecorded: sales.length,
+            }),
+          });
+          const data = await res.json();
+          if (data.success && Array.isArray(data.syncedIds)) {
+            syncedCount += data.syncedIds.length;
+          }
+        } catch {
+          // Non-blocking fallback
+        }
+      }
+
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSyncTime(nowStr);
+      localStorage.setItem(`apna_pos_${activeBusinessId}_last_sync`, nowStr);
+
+      if (syncedCount > 0) {
+        logActivity('sync', 'Background Sync Completed', `Pushed ${syncedCount} cached record(s) to Firestore`);
         sounds.playCheckoutChime();
+      }
+
+      if (bgRes.skippedReason === 'offline') {
+        return { success: false, count: 0, message: 'Offline — transactions cached safely in IndexedDB' };
+      }
+      if (bgRes.skippedReason === 'unauthenticated') {
         return {
           success: true,
-          count: syncedIds.size,
-          message: data.message || `Reconciled ${syncedIds.size} transactions with Cloud Database`,
+          count: syncedCount,
+          message: 'Cached in IndexedDB — sign in with Google to push to Firestore',
         };
       }
-      return { success: false, count: 0, message: 'Sync response unsuccessful' };
+
+      return {
+        success: bgRes.failed === 0,
+        count: syncedCount,
+        message:
+          syncedCount > 0
+            ? `Synced ${syncedCount} transaction${syncedCount === 1 ? '' : 's'} to Firestore`
+            : bgRes.failed > 0
+            ? `${bgRes.failed} item(s) waiting for retry`
+            : 'All transactions synced with Firestore',
+      };
     } catch (err: any) {
-      console.warn('Sync offline sales failed, network still unavailable:', err);
+      console.warn('Background sync failed, retrying automatically:', err);
       return { success: false, count: 0, message: err?.message || 'Network unavailable' };
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // Auto-sync listener when connection returns
+  // Start BackgroundSyncService, sync manual offline toggle, and listen for auto-pushed sales
   useEffect(() => {
+    backgroundSyncService.start();
+
+    const unsubSnap = backgroundSyncService.subscribe((snap) => {
+      setPendingSyncCount(snap.totalPendingCount);
+      setIsSyncing(snap.state === 'syncing');
+      if (snap.lastSyncAt) {
+        const formatted = new Date(snap.lastSyncAt).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        setLastSyncTime(formatted);
+      }
+    });
+
+    const unsubSale = backgroundSyncService.onSaleSynced((saleId, syncedAt) => {
+      const sanitizedId = sanitizeFirestoreId(saleId);
+      setSales((prev) =>
+        prev.map((s) =>
+          s.id === saleId || sanitizeFirestoreId(s.id) === sanitizedId
+            ? { ...s, isOfflineSyncPending: false, syncedAt }
+            : s
+        )
+      );
+      setOfflineSalesQueue((prev) => {
+        const remaining = prev.filter(
+          (s) => s.id !== saleId && sanitizeFirestoreId(s.id) !== sanitizedId
+        );
+        if (remaining.length !== prev.length) {
+          if (remaining.length === 0) {
+            localStorage.removeItem(`apna_pos_${activeBusinessId}_offline_queue`);
+          } else {
+            localStorage.setItem(`apna_pos_${activeBusinessId}_offline_queue`, JSON.stringify(remaining));
+          }
+        }
+        return remaining;
+      });
+    });
+
     const handleOnline = () => {
       setIsOffline(false);
-      // Trigger cloud database synchronization for pending offline sales
-      syncOfflineSales();
     };
-
     const handleOffline = () => {
       setIsOffline(true);
     };
@@ -2813,10 +3323,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
+      unsubSnap();
+      unsubSale();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [offlineSalesQueue, activeBusinessId]);
+  }, [activeBusinessId]);
+
+  useEffect(() => {
+    backgroundSyncService.setManualOffline(isOffline);
+  }, [isOffline]);
 
   // ---------------- STOCK BACKUPS (MANUAL & AI DAILY) ----------------
   const createManualStockBackup = (notes?: string): StockBackupRecord => {
@@ -3267,7 +3783,19 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const changeUserPassword = async (currentPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
+    if (newPass.length < 6) {
+      return { success: false, message: 'New password must be at least 6 characters long.' };
+    }
     try {
+      const fbUser = auth.currentUser;
+      if (fbUser && fbUser.email && fbUser.providerData.some((p) => p.providerId === 'password')) {
+        const cred = EmailAuthProvider.credential(fbUser.email, currentPass);
+        await reauthenticateWithCredential(fbUser, cred);
+        await updatePassword(fbUser, newPass);
+        logActivity('auth', 'Password Updated', `Password updated for ${fbUser.email}`);
+        return { success: true, message: 'Password updated successfully.' };
+      }
+
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3278,9 +3806,12 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }),
       });
       const data = await res.json();
+      if (data.success) {
+        logActivity('auth', 'Password Updated', `Password updated for ${userSession.email}`);
+      }
       return data;
-    } catch {
-      return { success: false, message: 'Server communication error while changing password' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Unable to change password right now.' };
     }
   };
 
@@ -3378,8 +3909,24 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         cart,
         addToCart,
         removeFromCart,
+        removeCartItemAt,
         updateCartQuantity,
+        updateCartItemAt,
         clearCart,
+        heldOrders,
+        holdCurrentOrder,
+        resumeHeldOrder,
+        deleteHeldOrder,
+        selectedPosCustomer,
+        setSelectedPosCustomer,
+        loyaltyPointsMap,
+        redeemLoyaltyPoints,
+        coupons,
+        addCoupon,
+        toggleCouponActive,
+        deleteCoupon,
+        appliedCouponCode,
+        setAppliedCouponCode,
         cartDiscount,
         setCartDiscount,
         cartTaxRate,
@@ -3502,10 +4049,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         userSession,
         setUserSession,
         googleSignIn,
+        firebaseSignInWithGoogle,
         googleSignOut,
         changeUserPassword,
         resetAllData,
         loadDemoSampleData,
+        activityLogs,
+        logActivity,
+        pendingSyncCount,
         // Attendance
         attendanceRecords,
         markAttendance,

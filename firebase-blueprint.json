@@ -1,0 +1,244 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated merchant or staff user account profile with strict owner-only PII isolation.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["owner", "admin", "manager", "cashier", "staff"] },
+        "activeStoreId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "An isolated retail store or branch owned by a merchant account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "maxLength": 160 },
+        "storeName": { "type": "string", "maxLength": 160 },
+        "currency": { "type": "string", "maxLength": 12 },
+        "taxRate": { "type": "number" },
+        "vertical": { "type": "string", "maxLength": 64 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "address": { "type": "string", "maxLength": 300 },
+        "city": { "type": "string", "maxLength": 100 },
+        "receiptFooter": { "type": "string", "maxLength": 300 },
+        "logoUrl": { "type": "string", "maxLength": 200000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "businessName", "storeName", "currency", "taxRate", "vertical", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Store-scoped product record with English/Urdu names, pricing, stock, and garment/fabric variant metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "urduName": { "type": "string", "maxLength": 200 },
+        "barcode": { "type": "string", "maxLength": 64 },
+        "category": { "type": "string", "maxLength": 100 },
+        "vertical": { "type": "string", "maxLength": 64 },
+        "costPrice": { "type": "number" },
+        "retailPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 32 },
+        "taxPercent": { "type": "number" },
+        "size": { "type": "string", "maxLength": 64 },
+        "color": { "type": "string", "maxLength": 64 },
+        "imageId": { "type": "string", "maxLength": 128 },
+        "colorVariants": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "name", "barcode", "category", "vertical", "costPrice", "retailPrice", "stockQuantity", "minStockAlert", "unit", "taxPercent", "createdAt", "updatedAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Completed POS sale transaction with idempotent client UUID for duplicate-free offline sync.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invoiceNo": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 160 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "taxAmount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "profit": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "jazzcash", "easypaisa", "card", "bank_transfer", "split", "udhar"] },
+        "status": { "type": "string", "enum": ["completed", "refunded", "void"] },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "invoiceNo", "customerName", "items", "subtotal", "discountAmount", "taxAmount", "grandTotal", "profit", "paymentMethod", "status", "timestamp", "createdAt", "updatedAt"]
+    },
+    "CustomerKhata": {
+      "title": "CustomerKhata",
+      "description": "Store-scoped customer profile and Udhar credit ledger balance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "customerName": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "creditLimit": { "type": "number" },
+        "currentBalance": { "type": "number" },
+        "transactions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "customerName", "phone", "creditLimit", "currentBalance", "createdAt", "updatedAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Store-scoped wholesale supplier and payables record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 160 },
+        "contactPerson": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "city": { "type": "string", "maxLength": 100 },
+        "totalPurchased": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "name", "phone", "totalPurchased", "totalPaid", "balanceDue", "createdAt", "updatedAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Store-scoped business operating expense record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "maxLength": 180 },
+        "category": { "type": "string", "maxLength": 80 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 40 },
+        "date": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "title", "category", "amount", "paymentMethod", "date", "createdAt"]
+    },
+    "ReturnRecord": {
+      "title": "ReturnRecord",
+      "description": "Store-scoped customer return and refund transaction.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "saleId": { "type": "string", "maxLength": 128 },
+        "invoiceNo": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 160 },
+        "totalRefundAmount": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 300 },
+        "date": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "saleId", "invoiceNo", "customerName", "totalRefundAmount", "date", "createdAt"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Store-scoped staff member role assignment and permissions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["admin", "manager", "cashier", "staff"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "name", "email", "role", "isActive", "createdAt", "updatedAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Immutable store-scoped audit log entry for sales, inventory, auth, and configuration actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorEmail": { "type": "string", "maxLength": 200 },
+        "actorRole": { "type": "string", "maxLength": 40 },
+        "category": { "type": "string", "enum": ["sale", "inventory", "auth", "store", "finance", "sync"] },
+        "action": { "type": "string", "maxLength": 160 },
+        "details": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerId", "storeId", "actorEmail", "actorRole", "category", "action", "details", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profiles with strict owner-only access."
+    },
+    "/stores/{storeId}": {
+      "schema": { "$ref": "#/entities/Store" },
+      "description": "Merchant-owned stores and branch configurations."
+    },
+    "/stores/{storeId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Store-specific product catalog and stock quantities."
+    },
+    "/stores/{storeId}/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "Store-specific completed POS sales and offline-synced receipts."
+    },
+    "/stores/{storeId}/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/CustomerKhata" },
+      "description": "Store-specific customer and Udhar Khatta ledger records."
+    },
+    "/stores/{storeId}/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Store-specific supplier and payables ledger."
+    },
+    "/stores/{storeId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Store-specific operating expense records."
+    },
+    "/stores/{storeId}/returns/{returnId}": {
+      "schema": { "$ref": "#/entities/ReturnRecord" },
+      "description": "Store-specific sales returns and refunds."
+    },
+    "/stores/{storeId}/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Store-specific staff roles and access control records."
+    },
+    "/stores/{storeId}/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Store-specific append-only audit activity logs."
+    }
+  }
+}

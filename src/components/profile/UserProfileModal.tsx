@@ -1,25 +1,21 @@
 import React, { useState, useRef } from 'react';
 import { usePos } from '../../context/PosContext';
 import {
-  User,
   LogOut,
-  ShieldCheck,
   Check,
   Store,
   Key,
   X,
-  Sparkles,
-  ExternalLink,
   QrCode,
   Upload,
   Trash2,
-  Camera,
   CheckCircle2,
-  Eye,
   ZoomIn,
   Building2,
   Smartphone,
   Landmark,
+  UserCheck,
+  AlertCircle,
 } from 'lucide-react';
 
 interface UserProfileModalProps {
@@ -31,17 +27,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
   const {
     userSession,
     setUserSession,
-    googleSignIn,
     googleSignOut,
     storeProfile,
     updateStoreProfile,
     changeUserPassword,
-    staffAccounts,
-    switchActiveUserAccount,
+    logActivity,
   } = usePos();
-  const [isEditing, setIsEditing] = useState(false);
-  const [nameInput, setNameInput] = useState(userSession.displayName ?? '');
-  const [emailInput, setEmailInput] = useState(userSession.email ?? '');
+
+  const [profileName, setProfileName] = useState(userSession.displayName ?? '');
+  const [profileSaved, setProfileSaved] = useState(false);
 
   // User Payment QR Upload state
   const qrFileInputRef = useRef<HTMLInputElement>(null);
@@ -58,20 +52,46 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
     userSession.paymentQrAccountNo || storeProfile.paymentQrAccountNo || ''
   );
   const [qrSaveSuccess, setQrSaveSuccess] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [confirmRemoveQr, setConfirmRemoveQr] = useState(false);
   const [isZoomingQr, setIsZoomingQr] = useState(false);
-  const [isQrSectionOpen, setIsQrSectionOpen] = useState(true);
+  const [isQrSectionOpen, setIsQrSectionOpen] = useState(false);
+
+  // Change Password state
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [currentPassInput, setCurrentPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+  const [confirmPassInput, setConfirmPassInput] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const isSuperAdmin = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
+
+  const handleSaveProfileName = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = profileName.trim();
+    if (!cleaned) return;
+    setUserSession((prev) => ({ ...prev, displayName: cleaned }));
+    logActivity('store', 'Updated Profile', `Updated account display name to ${cleaned}`);
+    setProfileSaved(true);
+    setTimeout(() => setProfileSaved(false), 2500);
+  };
 
   const handleQrFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setQrError(null);
 
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file (PNG, JPG, WebP).');
+      setQrError('Please select a valid image file (PNG, JPG, WebP).');
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image under 5MB.');
+      setQrError('Image file is too large. Please select an image under 5MB.');
       return;
     }
 
@@ -87,6 +107,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
 
   const handleSavePaymentQr = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    setQrError(null);
     updateStoreProfile({
       paymentQrUrl: qrImageUrl,
       paymentQrType: qrType,
@@ -100,33 +121,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
       paymentQrTitle: qrAccountTitle,
       paymentQrAccountNo: qrAccountNo,
     }));
+    logActivity('store', 'Updated Payment QR', `Updated counter payment QR (${qrType.toUpperCase()})`);
     setQrSaveSuccess(true);
     setTimeout(() => setQrSaveSuccess(false), 3000);
   };
 
   const handleRemovePaymentQr = () => {
-    if (confirm('Are you sure you want to remove this Payment QR code?')) {
-      setQrImageUrl('');
-      updateStoreProfile({
-        paymentQrUrl: '',
-      });
-      setUserSession((prev) => ({
-        ...prev,
-        paymentQrUrl: '',
-      }));
-    }
+    setQrImageUrl('');
+    setConfirmRemoveQr(false);
+    updateStoreProfile({ paymentQrUrl: '' });
+    setUserSession((prev) => ({ ...prev, paymentQrUrl: '' }));
   };
-
-  // Change Password state
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [currentPassInput, setCurrentPassInput] = useState('');
-  const [newPassInput, setNewPassInput] = useState('');
-  const [confirmPassInput, setConfirmPassInput] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-
-  if (!isOpen) return null;
 
   const handleChangeUserPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,88 +151,66 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
     try {
       const res = await changeUserPassword(currentPassInput, newPassInput);
       if (res.success) {
-        setPasswordSuccess('Password successfully changed in database!');
+        setPasswordSuccess(res.message || 'Password updated successfully.');
         setCurrentPassInput('');
         setNewPassInput('');
         setConfirmPassInput('');
+        logActivity('auth', 'Password Updated', 'Account password updated from profile modal');
       } else {
-        setPasswordError(res.message || 'Failed to change password');
+        setPasswordError(res.message || 'Failed to update password.');
       }
     } catch (err: any) {
-      setPasswordError(err.message || 'Failed to change password');
+      setPasswordError(err.message || 'Failed to update password.');
     } finally {
       setPasswordLoading(false);
     }
   };
 
-  const handleSwitchAccount = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!emailInput.trim()) return;
-    googleSignIn(emailInput.trim(), nameInput.trim() || 'Store User');
-    setIsEditing(false);
-  };
-
-  const handleSignInAsBashir = () => {
-    googleSignIn('bashirsonselectric@gmail.com', 'Muhammad Bashir & Sons');
-    setIsEditing(false);
-  };
-
-  const handleSignInAsCashier = () => {
-    googleSignIn('asif.cashier@godigly.com', 'Asif Khan (Counter 1)');
-    setIsEditing(false);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in">
-      <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Header with Google Theme */}
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 relative">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="bg-slate-900 dark:bg-slate-950 text-white p-5 relative border-b border-slate-800">
           <button
+            type="button"
             onClick={onClose}
-            className="absolute right-4 top-4 p-1.5 rounded-full hover:bg-white/10 text-slate-300 hover:text-white"
+            aria-label="Close profile modal"
+            className="absolute right-4 top-4 p-1.5 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center space-x-3.5">
+          <div className="flex items-center space-x-3.5 pr-8">
             <div className="relative">
               {userSession.photoURL ? (
                 <img
                   src={userSession.photoURL}
                   alt={userSession.displayName}
-                  className="w-14 h-14 rounded-2xl object-cover ring-2 ring-emerald-400/50 shadow-md"
+                  className="w-13 h-13 rounded-xl object-cover ring-2 ring-indigo-400/50"
                 />
               ) : (
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-xl text-white ring-2 ring-emerald-400/50">
-                  {userSession.displayName.charAt(0)}
+                <div className="w-13 h-13 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-lg text-white">
+                  {(userSession.displayName || 'U').charAt(0).toUpperCase()}
                 </div>
-              )}
-              {userSession.isGoogleSignedIn && (
-                <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow-xs">
-                  <span className="text-[10px] font-black text-indigo-600">G</span>
-                </span>
               )}
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <h3 className="font-bold text-base text-white truncate">
-                  {userSession.displayName}
-                </h3>
-              </div>
+              <h3 className="font-bold text-base text-white truncate">{userSession.displayName}</h3>
               <p className="text-xs text-slate-300 font-mono truncate">{userSession.email}</p>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span
-                  className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-                    userSession.email === 'bashirsonselectric@gmail.com'
-                      ? 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
-                      : 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30'
-                  }`}
-                >
-                  {userSession.email === 'bashirsonselectric@gmail.com' ? 'Super Admin' : userSession.role}
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-200 border border-indigo-400/30">
+                  {isSuperAdmin ? 'Super Admin' : userSession.role}
                 </span>
-                <span className="text-[11px] text-slate-400">
-                  {userSession.isGoogleSignedIn ? 'Google Verified' : 'Guest'}
+                <span className="text-[11px] text-emerald-300 flex items-center gap-1">
+                  <UserCheck className="w-3 h-3" />
+                  {userSession.isGoogleSignedIn ? 'Verified Account' : 'Active Session'}
                 </span>
               </div>
             </div>
@@ -235,314 +218,209 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-5 max-h-[78vh] overflow-y-auto custom-scrollbar">
-          {/* Active Store Branch Info */}
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs space-y-1.5">
-            <div className="flex justify-between items-center text-slate-500">
-              <span className="flex items-center gap-1 font-semibold">
-                <Store className="w-3.5 h-3.5 text-slate-400" /> Active Branch
+        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+          {/* Active Store Info */}
+          <div className="bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
+            <div className="flex justify-between items-center text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Store className="w-3.5 h-3.5" /> Active Store
               </span>
-              <span className="font-mono text-slate-800 font-bold">Main Bazaar Branch # 14</span>
-            </div>
-            <div className="flex justify-between items-center text-slate-500">
-              <span>SaaS Subscription:</span>
-              <span className="font-bold text-emerald-700 capitalize">
-                {storeProfile.saasTier} Plan by Godigly
+              <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[200px]">
+                {storeProfile.name}
               </span>
             </div>
-            <div className="flex justify-between items-center text-slate-500">
-              <span>Master Admin Access:</span>
-              <span
-                className={`font-bold ${
-                  userSession.email === 'bashirsonselectric@gmail.com'
-                    ? 'text-emerald-700'
-                    : 'text-rose-600'
-                }`}
-              >
-                {userSession.email === 'bashirsonselectric@gmail.com' ? 'Authorized (Unlocked)' : 'Locked (Restricted)'}
+            <div className="flex justify-between items-center text-slate-500 dark:text-slate-400">
+              <span>Account Scope</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                Private Isolated Workspace
               </span>
             </div>
           </div>
 
-          {/* Account Switcher Options */}
-          {!isEditing ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                  Saved Multi-User Accounts ({staffAccounts.length}):
-                </span>
-                <span className="text-[10px] text-purple-600 font-bold">1-Click Switch</span>
-              </div>
-
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {staffAccounts.map((acc) => {
-                  const isActive = userSession.email.toLowerCase().trim() === acc.email.toLowerCase().trim();
-                  return (
-                    <button
-                      key={acc.id}
-                      type="button"
-                      onClick={() => switchActiveUserAccount(acc.email)}
-                      className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between text-xs transition-all cursor-pointer ${
-                        isActive
-                          ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold shadow-2xs ring-1 ring-emerald-500/30'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2.5 min-w-0">
-                        <div
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 ${
-                            acc.role === 'admin'
-                              ? 'bg-purple-600'
-                              : acc.role === 'manager'
-                              ? 'bg-indigo-600'
-                              : 'bg-slate-700'
-                          }`}
-                        >
-                          {acc.name.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-bold truncate flex items-center gap-1.5 text-slate-900">
-                            <span>{acc.name}</span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-bold uppercase border border-slate-200">
-                              {acc.role}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 truncate font-mono">{acc.email}</div>
-                        </div>
-                      </div>
-                      {isActive && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
-
+          {/* Profile Display Name Update */}
+          <form onSubmit={handleSaveProfileName} className="space-y-2">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Display Name
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                placeholder="Your full name"
+                className="flex-1 px-3 py-2 text-xs bg-white dark:bg-slate-950 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+              />
               <button
-                type="button"
-                onClick={() => setIsEditing(true)}
-                className="w-full py-2 text-xs text-center text-purple-700 hover:text-purple-900 font-bold cursor-pointer"
+                type="submit"
+                className="px-3.5 py-2 rounded-lg bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
               >
-                + Sign in or Add Another User Account
+                {profileSaved ? 'Saved' : 'Save'}
               </button>
             </div>
-          ) : (
-            <form onSubmit={handleSwitchAccount} className="space-y-3 pt-1">
-              <div>
-                <label className="block text-xs font-bold text-slate-900 mb-1">
-                  User Account Email:
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={emailInput ?? ''}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="name@bashirsons.com"
-                  className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 placeholder:text-slate-400 rounded-lg focus:outline-hidden font-medium"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-900 mb-1">Display Name:</label>
-                <input
-                  type="text"
-                  required
-                  value={nameInput ?? ''}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  placeholder="Staff / Cashier Name"
-                  className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 placeholder:text-slate-400 rounded-lg focus:outline-hidden font-medium"
-                />
-              </div>
-              <div className="flex space-x-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="flex-1 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold cursor-pointer"
-                >
-                  Sign In / Switch
-                </button>
-              </div>
-            </form>
-          )}
+          </form>
 
-          {/* Cashier & Store Payment QR Code Upload Section */}
-          <div className="pt-3 border-t border-slate-200">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <QrCode className="w-4 h-4 text-emerald-600" />
-                Payment QR Code (Cashier / Counter)
+          {/* Cashier & Store Payment QR Code Section */}
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsQrSectionOpen(!isQrSectionOpen)}
+              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-between transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                Counter Payment QR (Raast / Wallet)
               </span>
-              <button
-                type="button"
-                onClick={() => setIsQrSectionOpen(!isQrSectionOpen)}
-                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
-              >
-                {isQrSectionOpen ? 'Collapse ▲' : 'Expand ▼'}
-              </button>
-            </div>
+              <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                {isQrSectionOpen ? 'Hide' : 'Configure'}
+              </span>
+            </button>
 
             {isQrSectionOpen && (
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
+              <div className="mt-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
                 {qrSaveSuccess && (
-                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold flex items-center gap-1.5 animate-in fade-in">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Payment QR settings saved to counter & user profile!</span>
+                  <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-medium flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Payment QR saved for POS checkout.</span>
                   </div>
                 )}
 
-                {/* QR Method Type Selector */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1.5">
-                    Select QR Gateway Type:
-                  </label>
-                  <div className="grid grid-cols-4 gap-1.5 text-center">
-                    {[
-                      { id: 'raast', label: 'Raast Pay', icon: Landmark, color: 'text-indigo-600' },
-                      { id: 'jazzcash', label: 'JazzCash', icon: Smartphone, color: 'text-rose-600' },
-                      { id: 'easypaisa', label: 'EasyPaisa', icon: Smartphone, color: 'text-emerald-600' },
-                      { id: 'bank', label: 'Bank IBAN', icon: Building2, color: 'text-blue-600' },
-                    ].map((type) => {
-                      const IconComp = type.icon;
-                      const active = qrType === type.id;
-                      return (
-                        <button
-                          key={type.id}
-                          type="button"
-                          onClick={() => setQrType(type.id as any)}
-                          className={`py-1.5 px-2 rounded-xl border text-[11px] font-bold transition-all flex flex-col items-center gap-1 ${
-                            active
-                              ? 'border-indigo-600 bg-white text-indigo-950 shadow-xs ring-1 ring-indigo-500'
-                              : 'border-slate-200 bg-white/70 text-slate-600 hover:bg-white'
-                          }`}
-                        >
-                          <IconComp className={`w-3.5 h-3.5 ${type.color}`} />
-                          <span className="truncate w-full">{type.label}</span>
-                        </button>
-                      );
-                    })}
+                {qrError && (
+                  <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-medium flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{qrError}</span>
                   </div>
+                )}
+
+                <div className="grid grid-cols-4 gap-1.5 text-center">
+                  {[
+                    { id: 'raast', label: 'Raast', icon: Landmark, color: 'text-indigo-600' },
+                    { id: 'jazzcash', label: 'JazzCash', icon: Smartphone, color: 'text-rose-600' },
+                    { id: 'easypaisa', label: 'EasyPaisa', icon: Smartphone, color: 'text-emerald-600' },
+                    { id: 'bank', label: 'Bank', icon: Building2, color: 'text-blue-600' },
+                  ].map((type) => {
+                    const IconComp = type.icon;
+                    const active = qrType === type.id;
+                    return (
+                      <button
+                        key={type.id}
+                        type="button"
+                        onClick={() => setQrType(type.id as any)}
+                        className={`py-2 px-1.5 rounded-lg border text-[11px] font-semibold transition-all flex flex-col items-center gap-1 ${
+                          active
+                            ? 'border-indigo-600 bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300'
+                            : 'border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <IconComp className={`w-3.5 h-3.5 ${type.color}`} />
+                        <span className="truncate w-full">{type.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* Account Details */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Account Title / Name:
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      Account Title
                     </label>
                     <input
                       type="text"
                       value={qrAccountTitle}
                       onChange={(e) => setQrAccountTitle(e.target.value)}
-                      placeholder="e.g. Muhammad Bashir"
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                      placeholder="Business Account Title"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Account No / Till / Raast:
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      Account / Till No.
                     </label>
                     <input
                       type="text"
                       value={qrAccountNo}
                       onChange={(e) => setQrAccountNo(e.target.value)}
-                      placeholder="e.g. 03001234567"
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                      placeholder="03001234567"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
                     />
                   </div>
                 </div>
 
-                {/* Upload or Preview Box */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
-                    <span>Payment QR Image File:</span>
-                    <span className="text-[10px] text-slate-500">PNG, JPG, WebP (Max 5MB)</span>
-                  </label>
+                <input
+                  ref={qrFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQrFileUpload}
+                  className="hidden"
+                />
 
-                  <input
-                    ref={qrFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleQrFileUpload}
-                    className="hidden"
-                  />
+                {qrImageUrl ? (
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                    <div className="relative group cursor-pointer" onClick={() => setIsZoomingQr(true)}>
+                      <img
+                        src={qrImageUrl}
+                        alt="Uploaded Payment QR"
+                        className="w-14 h-14 object-contain rounded-lg border border-slate-200 bg-white p-1"
+                      />
+                      <span className="absolute inset-0 bg-black/40 rounded-lg opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
+                        <ZoomIn className="w-4 h-4" />
+                      </span>
+                    </div>
 
-                  {qrImageUrl ? (
-                    <div className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-xs">
-                      <div className="relative group cursor-pointer" onClick={() => setIsZoomingQr(true)}>
-                        <img
-                          src={qrImageUrl}
-                          alt="Uploaded Payment QR"
-                          className="w-16 h-16 object-contain rounded-lg border border-slate-200 bg-white p-1 shadow-2xs"
-                        />
-                        <span className="absolute inset-0 bg-black/40 rounded-lg opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
-                          <ZoomIn className="w-4 h-4" />
-                        </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                        {qrAccountTitle || 'Payment QR'}
                       </div>
+                      <p className="text-[11px] font-mono text-slate-500 truncate">
+                        {qrAccountNo || qrType.toUpperCase()}
+                      </p>
+                    </div>
 
-                      <div className="flex-1 min-w-0 text-left">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-900 truncate">
-                            {qrAccountTitle || 'Custom Payment QR'}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 text-emerald-800">
-                            Active
-                          </span>
-                        </div>
-                        <p className="text-[11px] font-mono text-slate-500 truncate mt-0.5">
-                          {qrAccountNo || qrType.toUpperCase()}
-                        </p>
-                        <p className="text-[10px] text-emerald-600 font-semibold mt-0.5 flex items-center gap-1">
-                          <Check className="w-3 h-3" /> Ready for POS checkout
-                        </p>
-                      </div>
-
-                      <div className="flex flex-col gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => qrFileInputRef.current?.click()}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          <Upload className="w-3 h-3" /> Replace
-                        </button>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => qrFileInputRef.current?.click()}
+                        className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold flex items-center gap-1"
+                      >
+                        <Upload className="w-3 h-3" /> Replace
+                      </button>
+                      {confirmRemoveQr ? (
                         <button
                           type="button"
                           onClick={handleRemovePaymentQr}
-                          className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-semibold"
+                        >
+                          Confirm?
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRemoveQr(true)}
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-[11px] font-semibold flex items-center gap-1"
                         >
                           <Trash2 className="w-3 h-3" /> Remove
                         </button>
-                      </div>
+                      )}
                     </div>
-                  ) : (
-                    <div
-                      onClick={() => qrFileInputRef.current?.click()}
-                      className="border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/30 rounded-2xl p-5 text-center cursor-pointer transition-all group"
-                    >
-                      <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 group-hover:scale-110 flex items-center justify-center mx-auto mb-2 transition-transform shadow-xs">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
-                        Click to Upload Payment QR Code
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Upload screenshot or photo of Raast, JazzCash Till, or EasyPaisa QR
-                      </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => qrFileInputRef.current?.click()}
+                    className="w-full border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-500 rounded-xl p-4 text-center cursor-pointer transition-colors"
+                  >
+                    <Upload className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mx-auto mb-1.5" />
+                    <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Upload Payment QR Image
                     </div>
-                  )}
-                </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">PNG, JPG, WebP up to 5MB</p>
+                  </button>
+                )}
 
-                {/* Save Button */}
-                <div className="pt-1 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-500">
-                    Syncs to POS counter modal & customer checkout
-                  </span>
+                <div className="flex justify-end">
                   <button
                     type="button"
                     onClick={handleSavePaymentQr}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5"
                   >
                     <Check className="w-3.5 h-3.5" /> Save Payment QR
                   </button>
@@ -556,78 +434,81 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
             <button
               type="button"
               onClick={() => setIsChangingPassword(!isChangingPassword)}
-              className="w-full py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 text-left text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between transition-colors"
+              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-left text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-between transition-colors"
             >
-              <span className="flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-indigo-500" />
-                Change Password (PBKDF2 Hash)
+              <span className="flex items-center gap-2">
+                <Key className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                Change Account Password
               </span>
-              <span className="text-[10px] text-indigo-600 dark:text-indigo-400">
-                {isChangingPassword ? 'Hide ▲' : 'Open ▼'}
+              <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                {isChangingPassword ? 'Hide' : 'Update'}
               </span>
             </button>
 
             {isChangingPassword && (
-              <form onSubmit={handleChangeUserPassword} className="mt-3 p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+              <form
+                onSubmit={handleChangeUserPassword}
+                className="mt-3 p-4 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3"
+              >
                 {passwordSuccess && (
-                  <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-[11px] font-semibold">
+                  <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-medium">
                     {passwordSuccess}
                   </div>
                 )}
                 {passwordError && (
-                  <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-[11px] font-semibold">
+                  <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-medium">
                     {passwordError}
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-900 mb-1">
-                    Current Password:
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Current Password
                   </label>
                   <input
                     type="password"
                     required
                     value={currentPassInput}
                     onChange={(e) => setCurrentPassInput(e.target.value)}
-                    placeholder="Enter current password..."
-                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
+                    placeholder="Enter current password"
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded-lg"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-900 mb-1">
-                    New Password:
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    New Password
                   </label>
                   <input
                     type="password"
                     required
                     value={newPassInput}
                     onChange={(e) => setNewPassInput(e.target.value)}
-                    placeholder="At least 6 characters..."
-                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
+                    placeholder="At least 6 characters"
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded-lg"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-900 mb-1">
-                    Confirm New Password:
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Confirm New Password
                   </label>
                   <input
                     type="password"
                     required
                     value={confirmPassInput}
                     onChange={(e) => setConfirmPassInput(e.target.value)}
-                    placeholder="Re-enter new password..."
-                    className="w-full px-3 py-2 text-xs bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-hidden font-medium placeholder:text-slate-400"
+                    placeholder="Re-enter new password"
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 rounded-lg"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={passwordLoading}
-                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
                 >
-                  {passwordLoading ? 'Updating Hash...' : 'Update Password'}
+                  {passwordLoading ? 'Updating...' : 'Update Password'}
                 </button>
               </form>
             )}
@@ -641,16 +522,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                 googleSignOut();
                 onClose();
               }}
-              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-colors"
+              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-semibold transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Sign Out Account</span>
+              <span>Sign Out</span>
             </button>
 
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
+              className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 hover:bg-slate-800 dark:hover:bg-white text-white dark:text-slate-900 text-xs font-semibold"
             >
               Done
             </button>
@@ -661,53 +542,48 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
       {/* Enlarge / Zoom QR Code Modal */}
       {isZoomingQr && qrImageUrl && (
         <div
-          className="fixed inset-0 z-70 bg-black/85 flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-70 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setIsZoomingQr(false)}
         >
           <div
-            className="bg-white rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-200"
+            className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl border border-slate-200 dark:border-slate-800"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <QrCode className="w-4 h-4 text-emerald-600" />
                 {qrType.toUpperCase()} Counter QR Code
               </span>
               <button
                 type="button"
                 onClick={() => setIsZoomingQr(false)}
-                className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex justify-center">
-              <img
-                src={qrImageUrl}
-                alt="Enlarged Payment QR"
-                className="w-64 h-64 object-contain rounded-xl shadow-xs"
-              />
+            <div className="p-4 bg-white rounded-xl border border-slate-200 flex justify-center">
+              <img src={qrImageUrl} alt="Enlarged Payment QR" className="w-60 h-60 object-contain" />
             </div>
 
             <div className="space-y-1">
-              <div className="text-base font-bold text-slate-900">{qrAccountTitle || storeProfile.name}</div>
+              <div className="text-sm font-bold text-slate-900 dark:text-white">
+                {qrAccountTitle || storeProfile.name}
+              </div>
               {qrAccountNo && (
-                <div className="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 py-1 px-3 rounded-full inline-block">
+                <div className="text-xs font-mono font-semibold text-indigo-600 dark:text-indigo-400">
                   {qrAccountNo}
                 </div>
               )}
-              <p className="text-[11px] text-slate-500">
-                Customer can scan directly from camera or bank/wallet app
-              </p>
             </div>
 
             <button
               type="button"
               onClick={() => setIsZoomingQr(false)}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors"
+              className="w-full py-2.5 bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl"
             >
-              Close Fullscreen
+              Close
             </button>
           </div>
         </div>

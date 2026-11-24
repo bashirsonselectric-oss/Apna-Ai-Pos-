@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePos } from '../../context/PosContext';
 import { Product, BusinessVertical } from '../../types';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
+import { PRODUCT_PRESET_IMAGES } from '../../lib/productThumbnails';
 import {
   Package,
   Plus,
@@ -156,8 +157,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
       minStockAlert: 5,
       unit: isGarmentOrFabric ? 'suit' : (verticalConfig.unitOptions[0] || 'pcs'),
       image: isGarmentOrFabric
-        ? 'https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?auto=format&fit=crop&q=80&w=400'
-        : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=300',
+        ? PRODUCT_PRESET_IMAGES.fabricSuit
+        : PRODUCT_PRESET_IMAGES.cableRed,
       color: isGarmentOrFabric ? 'Navy Blue' : 'Red',
       size: isGarmentOrFabric ? 'L' : '3/29',
       subSize: isGarmentOrFabric ? '4.5m Unstitched' : 'Single Core',
@@ -806,10 +807,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
                     <div className="flex flex-wrap items-center gap-1 mt-2">
                       <span className="text-[10px] text-slate-700 font-bold">Presets:</span>
                       {[
-                        { label: '👗 Fabric Suit (8 Colors)', url: 'https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?auto=format&fit=crop&q=80&w=400' },
-                        { label: '👕 Polo Garment (9 Colors)', url: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&q=80&w=400' },
-                        { label: '🔴 Cable Coil (Red)', url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=300' },
-                        { label: '⚫ Wire Reel (Black)', url: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=300' },
+                        { label: '👗 Fabric Suit (8 Colors)', url: PRODUCT_PRESET_IMAGES.fabricSuit },
+                        { label: '👕 Polo Garment (9 Colors)', url: PRODUCT_PRESET_IMAGES.poloGarment },
+                        { label: '🔴 Cable Coil (Red)', url: PRODUCT_PRESET_IMAGES.cableRed },
+                        { label: '⚫ Wire Reel (Black)', url: PRODUCT_PRESET_IMAGES.wireBlack },
                       ].map((sample) => (
                         <button
                           key={sample.label}

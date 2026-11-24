@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { usePos } from '../../context/PosContext';
 import { AdminOtpLock } from './AdminOtpLock';
 import { SupabaseCloudHub } from './SupabaseCloudHub';
+import { STORE_EMBLEM_PRESETS } from '../../lib/productThumbnails';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -784,9 +785,9 @@ const AdminPanelContent: React.FC<AdminPanelContentProps> = ({ onLock }) => {
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { label: 'Gold Shield', url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=200' },
-                    { label: 'Electric Bolt', url: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=200' },
-                    { label: 'Classic Store', url: 'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?auto=format&fit=crop&q=80&w=200' },
+                    { label: 'Gold Shield', url: STORE_EMBLEM_PRESETS.goldShield },
+                    { label: 'Electric Bolt', url: STORE_EMBLEM_PRESETS.electricBolt },
+                    { label: 'Classic Store', url: STORE_EMBLEM_PRESETS.classicStore },
                   ].map((preset) => (
                     <button
                       key={preset.label}

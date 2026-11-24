@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { usePos } from '../context/PosContext';
+import { PWAInstallButton } from './common/PWAInstallButton';
 import {
   Menu,
   RefreshCw,
-  Wifi,
   WifiOff,
   Cloud,
   CloudOff,
@@ -11,11 +11,13 @@ import {
   Plus,
   Moon,
   Sun,
-  Zap,
-  Sparkles,
-  User,
+  Store,
+  ChevronDown,
+  AlertTriangle,
+  Check,
+  Building2,
+  X,
 } from 'lucide-react';
-
 
 interface HeaderProps {
   onOpenAiHub?: () => void;
@@ -31,12 +33,14 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
   onOpenQuickSale,
   onOpenProfileModal,
+  onOpenAuthModal,
 }) => {
   const {
     storeProfile,
     isOffline,
     setIsOffline,
     offlineSalesQueue,
+    pendingSyncCount,
     isSyncing,
     lastSyncTime,
     syncOfflineSales,
@@ -44,211 +48,314 @@ export const Header: React.FC<HeaderProps> = ({
     userSession,
     theme,
     toggleTheme,
+    businessAccounts,
+    activeBusinessId,
+    switchBusinessAccount,
+    lowStockItems,
+    outOfStockItems,
+    activityLogs,
   } = usePos();
 
-
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [storeMenuOpen, setStoreMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const storeMenuRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (storeMenuRef.current && !storeMenuRef.current.contains(e.target as Node)) {
+        setStoreMenuOpen(false);
+      }
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
   const handleManualSync = async () => {
     const res = await syncOfflineSales();
-    if (res.success) {
-      setSyncFeedback(res.message || 'Synced with Cloud!');
-    } else {
-      setSyncFeedback(res.message || 'Offline mode active');
-    }
+    setSyncFeedback(res.message || (res.success ? 'Synced' : 'Offline'));
     setTimeout(() => setSyncFeedback(null), 3000);
   };
 
-  // Today's sales calculation
+  const userEmail = (userSession.email || '').toLowerCase().trim();
+  const isSuperAdmin = userEmail === 'bashirsonselectric@gmail.com';
+  const myStores = businessAccounts.filter(
+    (b) => isSuperAdmin || b.ownerEmail.toLowerCase().trim() === userEmail || b.id === activeBusinessId
+  );
+
   const today = new Date().toISOString().split('T')[0];
-  const todaySales = sales.filter((s) => s.timestamp.startsWith(today));
-  const todayRevenue = todaySales.reduce((sum, s) => sum + s.grandTotal, 0);
+  const todayRevenue = sales
+    .filter((s) => s.timestamp.startsWith(today))
+    .reduce((sum, s) => sum + s.grandTotal, 0);
+
+  const totalPending = Math.max(offlineSalesQueue.length, pendingSyncCount);
+  const alertCount = outOfStockItems.length + lowStockItems.length + totalPending;
 
   return (
-    <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Left: Mobile Hamburger & Brand & Store Logo */}
-          <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Side Menu Toggle Button */}
+    <header className="bg-white/95 dark:bg-[#161412]/95 backdrop-blur-sm text-[#141414] dark:text-[#F6F1EB] border-b border-[#E8E0D8] dark:border-[#2A2622] sticky top-0 z-30 transition-colors">
+      <div className="max-w-full px-3 sm:px-5">
+        <div className="flex items-center justify-between h-14 gap-2">
+          {/* Left: Sidebar Toggle, Boutique Lockup & Store Switcher */}
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
+              type="button"
               onClick={onToggleMobileMenu}
-              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-              title="Toggle Side Menu"
+              className="p-2 rounded-lg text-[#6B625C] dark:text-[#C9BFB6] hover:bg-[#F6F1EB] dark:hover:bg-[#221F1C] transition-colors cursor-pointer shrink-0"
+              title="Toggle Navigation"
             >
               <Menu className="w-5 h-5" />
             </button>
 
-            {/* Custom Business Logo or Styled Badge */}
             {storeProfile.logoUrl ? (
               <img
                 src={storeProfile.logoUrl}
                 alt={storeProfile.name}
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl object-cover ring-2 ring-emerald-500/40 shadow-md shrink-0"
+                className="w-8 h-8 rounded-lg object-cover border border-[#E8E0D8] dark:border-[#2E2A26] shrink-0"
               />
             ) : (
-              <div className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/20 font-extrabold text-base sm:text-lg tracking-wider shrink-0">
-                AI
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] font-editorial font-semibold text-sm shrink-0">
+                M
               </div>
             )}
 
-            <div className="min-w-0">
-              <div className="flex items-center space-x-1.5 sm:space-x-2">
-                <span className="font-bold text-sm sm:text-base tracking-tight text-white flex items-center gap-1">
-                  Apna AI POS
-                  <span className="text-[9px] uppercase font-semibold px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    Godigly
-                  </span>
-                </span>
-                <span className="text-slate-500 text-xs hidden lg:inline">|</span>
-                <span className="text-xs text-slate-300 font-medium truncate max-w-[120px] sm:max-w-xs hidden sm:inline">
+            {/* Multi-Store Switcher Dropdown */}
+            <div className="relative min-w-0" ref={storeMenuRef}>
+              <button
+                type="button"
+                onClick={() => setStoreMenuOpen((p) => !p)}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#1F1C19] hover:bg-[#F6F1EB] dark:hover:bg-[#282420] transition-colors max-w-[200px] sm:max-w-[260px] cursor-pointer"
+                title="Switch active boutique or add branch"
+              >
+                <Store className="w-3.5 h-3.5 text-[#7D6E65] dark:text-[#E5C6C3] shrink-0" />
+                <span className="font-editorial text-sm font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
                   {storeProfile.name}
                 </span>
-              </div>
-              <div className="flex items-center space-x-2 text-[10px] sm:text-[11px] text-slate-400">
-                {isOffline ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsOffline(false)}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[11px] shadow-xs hover:bg-amber-500/30 transition-all"
-                    title="Working in Offline Mode. Click to reconnect to Cloud Database"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                    <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Working Offline</span>
-                    <span className="text-[10px] text-amber-200/70 font-normal hidden sm:inline">(IndexedDB)</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    {/* Sync Status Indicator */}
-                    <div
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px] font-semibold transition-all ${
-                        isSyncing
-                          ? 'bg-blue-500/15 border-blue-500/30 text-blue-300'
-                          : offlineSalesQueue.length > 0
-                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                          : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                      }`}
-                      title={
-                        offlineSalesQueue.length > 0
-                          ? `${offlineSalesQueue.length} sales stored locally in IndexedDB pending cloud sync`
-                          : lastSyncTime
-                          ? `Reconciled with Cloud at ${lastSyncTime}`
-                          : 'Cloud Database Active'
-                      }
-                    >
-                      {isSyncing ? (
-                        <>
-                          <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                          <span className="font-bold">Syncing...</span>
-                        </>
-                      ) : offlineSalesQueue.length > 0 ? (
-                        <>
-                          <CloudOff className="w-3 h-3 text-amber-400" />
-                          <span className="font-bold">{offlineSalesQueue.length} Local Txns</span>
-                        </>
-                      ) : (
-                        <>
-                          <Cloud className="w-3 h-3 text-emerald-400" />
-                          <span className="font-bold">Cloud Synced</span>
-                          {lastSyncTime && (
-                            <span className="text-[10px] text-emerald-200/70 hidden lg:inline">({lastSyncTime})</span>
-                          )}
-                        </>
-                      )}
-                    </div>
+                <ChevronDown className="w-3.5 h-3.5 text-[#8A7E75] shrink-0" />
+              </button>
 
-                    {/* Sync Now Action Button */}
-                    <button
-                      type="button"
-                      onClick={handleManualSync}
-                      disabled={isSyncing}
-                      className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold shadow-xs border border-emerald-400/30 transition-all cursor-pointer"
-                      title="Sync Now: Reconciles local cart data and IndexedDB transactions with backend database"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-emerald-200' : ''}`} />
-                      <span>Sync Now</span>
-                    </button>
+              {storeMenuOpen && (
+                <div className="absolute left-0 mt-1.5 w-64 rounded-xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] shadow-xl p-2 z-50">
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8A7E75]">
+                    Your Boutiques ({myStores.length})
                   </div>
-                )}
+                  <div className="max-h-52 overflow-y-auto space-y-0.5 mt-1">
+                    {myStores.map((biz) => {
+                      const active = biz.id === activeBusinessId;
+                      return (
+                        <button
+                          key={biz.id}
+                          type="button"
+                          onClick={() => {
+                            switchBusinessAccount(biz.id, biz);
+                            setStoreMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-[#F3E1DF] dark:bg-[#3A2827] text-[#141414] dark:text-[#F6F1EB] font-semibold'
+                              : 'text-[#4A433E] dark:text-[#C9BFB6] hover:bg-[#FAF7F4] dark:hover:bg-[#24201C]'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate">{biz.businessName}</div>
+                            <div className="text-[10px] text-[#7D6E65] dark:text-[#A89E96] truncate">
+                              {biz.city || 'Flagship Boutique'} · {biz.currency}
+                            </div>
+                          </div>
+                          {active && <Check className="w-3.5 h-3.5 text-[#141414] dark:text-[#F3E1DF] shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {onOpenAuthModal && (
+                    <div className="pt-2 mt-2 border-t border-[#EFE8E0] dark:border-[#2A2622]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStoreMenuOpen(false);
+                          onOpenAuthModal();
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg bg-[#F6F1EB] dark:bg-[#24201C] hover:bg-[#EFE8E0] dark:hover:bg-[#2E2924] text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] transition-colors cursor-pointer"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                        <span>Add / Manage Stores</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
-                {syncFeedback && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-in fade-in">
-                    {syncFeedback}
-                  </span>
-                )}
-
-                <span className="hidden sm:inline">•</span>
-                <span className="text-slate-300 truncate hidden sm:inline">
-                  Today: <strong className="text-emerald-400 font-mono-numbers">
-                    {storeProfile.currency} {todayRevenue.toLocaleString()}
-                  </strong>
-                </span>
-              </div>
+            {/* Today's Revenue Summary */}
+            <div className="hidden xl:flex items-center gap-1.5 pl-3 border-l border-[#E8E0D8] dark:border-[#2A2622] text-xs text-[#7D6E65] dark:text-[#A89E96]">
+              <span>Today&apos;s Sales</span>
+              <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {storeProfile.currency} {todayRevenue.toLocaleString()}
+              </span>
             </div>
           </div>
 
-          {/* Right: Cryptoin Style Greeting, Quick Bill Button & Profile Avatar */}
-          <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Cashier Greeting */}
-            <div className="hidden lg:flex items-center space-x-1.5 text-xs text-slate-300 font-medium">
-              <span>Hi</span>
-              <strong className="text-white font-bold">
-                {userSession.displayName ? userSession.displayName.split(' ')[0] : 'Bashir'}
-              </strong>
-              <span>👋</span>
-            </div>
+          {/* Right: Sync, PWA, Theme Toggle, New Sale CTA, Alerts, Profile */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {isOffline ? (
+              <button
+                type="button"
+                onClick={() => setIsOffline(false)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#D4B483] dark:border-[#6B5434] bg-[#FBF5EC] dark:bg-[#2B2216] text-[#7A541F] dark:text-[#F1D29B] text-xs font-semibold cursor-pointer whitespace-nowrap"
+                title="Offline Mode active. Click to check connection."
+              >
+                <WifiOff className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Offline</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  totalPending > 0
+                    ? 'border-[#D4B483] dark:border-[#6B5434] bg-[#FBF5EC] dark:bg-[#2B2216] text-[#7A541F] dark:text-[#F1D29B]'
+                    : 'border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#1F1C19] text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#FAF7F4] dark:hover:bg-[#282420]'
+                }`}
+                title={lastSyncTime ? `Last synced at ${lastSyncTime}` : 'Sync offline queue with cloud'}
+              >
+                {isSyncing ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#141414] dark:text-[#F3E1DF]" />
+                ) : totalPending > 0 ? (
+                  <CloudOff className="w-3.5 h-3.5 text-[#9A6B2F]" />
+                ) : (
+                  <Cloud className="w-3.5 h-3.5 text-[#2F6B4F] dark:text-[#6EE7B7]" />
+                )}
+                <span className="hidden md:inline">
+                  {syncFeedback || (isSyncing ? 'Syncing...' : totalPending > 0 ? `Sync (${totalPending})` : 'Synced')}
+                </span>
+              </button>
+            )}
+
+            <PWAInstallButton />
 
             {/* Light / Dark Mode Toggle */}
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-              title="Toggle Light / Dark Mode"
+              className="p-2 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#1F1C19] text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#282420] transition-colors cursor-pointer"
+              title={theme === 'dark' ? 'Switch to Boutique Light Mode' : 'Switch to Evening Dark Mode'}
             >
               {theme === 'dark' ? (
-                <Moon className="w-4 h-4 text-purple-400" />
+                <Sun className="w-4 h-4 text-[#E5C6C3]" />
               ) : (
-                <Sun className="w-4 h-4 text-amber-400" />
+                <Moon className="w-4 h-4 text-[#141414]" />
               )}
             </button>
 
-            {/* Fast Action Quick Bill Button (Vibrant Purple Pill matching the screenshot's 'Send & Receive' button) */}
+            {/* Primary CTA: New Sale */}
             {onOpenQuickSale && (
               <button
                 type="button"
                 onClick={onOpenQuickSale}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-[0_0_15px_rgba(168,85,247,0.4)] transition-all cursor-pointer active:scale-95"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414] font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">+ Quick Bill (F2)</span>
-                <span className="sm:hidden">Bill</span>
+                <span className="hidden sm:inline">New Sale</span>
               </button>
             )}
 
-            {/* Notification Bell */}
-            <button
-              type="button"
-              className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors relative"
-              title="Notifications"
-            >
-              <Bell className="w-4 h-4 text-slate-300" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-            </button>
+            {/* Notifications Drawer */}
+            <div className="relative" ref={notifRef}>
+              <button
+                type="button"
+                onClick={() => setNotifOpen((p) => !p)}
+                className="p-2 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#1F1C19] text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#282420] transition-colors relative cursor-pointer"
+                title="Stock Alerts & Store Activity"
+              >
+                <Bell className="w-4 h-4" />
+                {alertCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#141414] dark:bg-[#F3E1DF] text-white dark:text-[#141414] text-[10px] font-bold flex items-center justify-center font-mono-numbers">
+                    {alertCount > 9 ? '9+' : alertCount}
+                  </span>
+                )}
+              </button>
 
-            {/* Cashier Avatar */}
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] shadow-xl z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-[#EFE8E0] dark:border-[#2A2622] flex items-center justify-between">
+                    <span className="font-editorial text-sm font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                      Boutique Alerts
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setNotifOpen(false)}
+                      className="text-[#8A7E75] hover:text-[#141414] dark:hover:text-white cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-[#EFE8E0] dark:divide-[#2A2622] text-xs">
+                    {outOfStockItems.length > 0 && (
+                      <div className="p-3 bg-[#F3E1DF]/50 dark:bg-[#3A2121]/50 flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-[#9B2C2C] dark:text-[#FCA5A5] shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-[#9B2C2C] dark:text-[#FCA5A5]">
+                            {outOfStockItems.length} Out-of-Stock Piece{outOfStockItems.length === 1 ? '' : 's'}
+                          </div>
+                          <div className="text-[11px] text-[#6B625C] dark:text-[#C9BFB6] mt-0.5 truncate max-w-[230px]">
+                            {outOfStockItems.slice(0, 3).map((p) => p.name).join(', ')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {lowStockItems.length > 0 && (
+                      <div className="p-3 bg-[#FAF7F4] dark:bg-[#24201C] flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-[#9A6B2F] dark:text-[#F1D29B] shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                            {lowStockItems.length} Low-Stock Alert{lowStockItems.length === 1 ? '' : 's'}
+                          </div>
+                          <div className="text-[11px] text-[#6B625C] dark:text-[#A89E96] mt-0.5 truncate max-w-[230px]">
+                            {lowStockItems.slice(0, 3).map((p) => p.name).join(', ')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {activityLogs.slice(0, 5).map((entry) => (
+                      <div key={entry.id} className="p-3 hover:bg-[#FAF7F4] dark:hover:bg-[#221F1C]">
+                        <div className="font-semibold text-[#141414] dark:text-[#F6F1EB]">{entry.action}</div>
+                        <div className="text-[11px] text-[#6B625C] dark:text-[#A89E96] truncate">{entry.details}</div>
+                        <div className="text-[10px] text-[#8A7E75] mt-0.5 font-mono-numbers">
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    ))}
+                    {alertCount === 0 && activityLogs.length === 0 && (
+                      <div className="p-6 text-center text-[#8A7E75]">
+                        Inventory levels and cloud sync are all clear.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* User Profile Avatar */}
             {onOpenProfileModal && (
               <button
                 type="button"
                 onClick={onOpenProfileModal}
-                className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center font-bold text-xs text-white ring-2 ring-purple-500/50 hover:ring-purple-400 transition-all cursor-pointer shadow-md"
-                title="Cashier Profile & QR Settings"
+                className="w-8 h-8 rounded-full bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F3E1DF] dark:hover:bg-[#E5C6C3] flex items-center justify-center font-semibold text-xs text-white dark:text-[#141414] transition-colors cursor-pointer shrink-0 overflow-hidden"
+                title={`${userSession.displayName} (${userSession.email})`}
               >
-                {userSession.displayName ? userSession.displayName.charAt(0) : 'B'}
+                {userSession.photoURL ? (
+                  <img src={userSession.photoURL} alt={userSession.displayName} className="w-full h-full object-cover" />
+                ) : (
+                  (userSession.displayName || 'U').charAt(0).toUpperCase()
+                )}
               </button>
             )}
           </div>
-
         </div>
       </div>
     </header>

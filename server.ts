@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -40,97 +41,67 @@ export interface UserRow {
   created_at: string;
 }
 
-// Password Hashing with PBKDF2 (SHA-512) & Salt (Cryptographic security standard)
+// Password Hashing with scrypt & per-user random salt (OWASP recommended KDF)
 function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return crypto.scryptSync(password, salt, 64).toString('hex');
 }
 
 function verifyPassword(password: string, storedHash: string, salt: string): boolean {
-  const calculated = hashPassword(password, salt);
-  try {
-    return crypto.timingSafeEqual(Buffer.from(calculated, 'hex'), Buffer.from(storedHash, 'hex'));
-  } catch {
-    return calculated === storedHash;
-  }
+  const calculated = Buffer.from(hashPassword(password, salt), 'hex');
+  const stored = Buffer.from(storedHash, 'hex');
+  if (calculated.length !== stored.length) return false;
+  return crypto.timingSafeEqual(calculated, stored);
 }
 
-// Seed Initial Database Users with Pre-hashed Passwords
-const DEFAULT_SALT_ADMIN = '7f8a9b0c1d2e3f4a';
-const DEFAULT_SALT_MGR = '4a3b2c1d0e9f8a7b';
-const DEFAULT_SALT_CASH = '1a2b3c4d5e6f7a8b';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ALLOWED_STAFF_ROLES = new Set(['manager', 'cashier']);
+const activeAdminSessions = new Set<string>();
 
-let usersDatabase: UserRow[] = [
-  {
-    id: 1,
-    name: 'Muhammad Bashir & Sons',
-    email: 'bashirsonselectric@gmail.com',
-    password: hashPassword('admin123', DEFAULT_SALT_ADMIN),
-    salt: DEFAULT_SALT_ADMIN,
-    role: 'admin',
-    storeName: 'Bashir Sons Electric & Hardware',
-    created_at: '2026-01-01T08:00:00.000Z',
-  },
-  {
-    id: 2,
-    name: 'Tariq Mehmood',
-    email: 'manager@bashirsons.com',
-    password: hashPassword('manager123', DEFAULT_SALT_MGR),
-    salt: DEFAULT_SALT_MGR,
-    role: 'manager',
-    storeName: 'Branch #2 (Commercial Market)',
-    created_at: '2026-02-15T09:30:00.000Z',
-  },
-  {
-    id: 3,
-    name: 'Ali Raza Cashier',
-    email: 'cashier1@bashirsons.com',
-    password: hashPassword('cashier123', DEFAULT_SALT_CASH),
-    salt: DEFAULT_SALT_CASH,
-    role: 'cashier',
-    storeName: 'Counter #1 POS Terminal',
-    created_at: '2026-03-01T10:15:00.000Z',
-  },
-];
+// In-memory user registry (populated via secure /api/auth/register & /api/auth/register-staff;
+// primary cloud accounts authenticate via Firebase Authentication).
+let usersDatabase: UserRow[] = [];
+let nextUserId = 1;
 
-let nextUserId = 4;
-
-// 1. Sign Up Endpoint: Validates uniqueness, hashes password, saves into users database table
+// 1. Sign Up Endpoint: Validates inputs, hashes password with scrypt, saves account
 app.post('/api/auth/register', (req, res) => {
   try {
-    const { name, email, password, role = 'admin', storeName = 'My Retail Store' } = req.body;
+    const { name, email, password, storeName = 'My Retail Store' } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Please provide a valid email address.' });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
 
-    // Check if email already exists in users database table (UNIQUE constraint)
     const existing = usersDatabase.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
       return res.status(409).json({
-        error: `User with email "${normalizedEmail}" is already registered in the database. Please log in instead.`,
+        error: 'An account with this email is already registered. Please sign in instead.',
       });
     }
 
-    // Generate random salt and compute cryptographic hash
     const salt = crypto.randomBytes(16).toString('hex');
-    const hashedPassword = hashPassword(password, salt);
+    const hashedPassword = hashPassword(String(password), salt);
 
     const newUser: UserRow = {
       id: nextUserId++,
-      name: String(name).trim(),
+      name: String(name).trim().slice(0, 120),
       email: normalizedEmail,
       password: hashedPassword,
       salt,
-      role: role as any,
-      storeName: String(storeName).trim(),
+      role: 'admin',
+      storeName: String(storeName).trim().slice(0, 140),
       created_at: new Date().toISOString(),
     };
 
     usersDatabase.push(newUser);
 
-    // Return sanitized user object (omit salt and full password in regular payload)
     const sanitized = {
       id: newUser.id,
       name: newUser.name,
@@ -140,26 +111,21 @@ app.post('/api/auth/register', (req, res) => {
       created_at: newUser.created_at,
     };
 
-    const token = `pos_jwt_${crypto.randomBytes(24).toString('hex')}`;
+    const token = `pos_session_${crypto.randomBytes(32).toString('hex')}`;
 
     return res.status(201).json({
       success: true,
-      message: 'Account successfully registered and saved to users database.',
+      message: 'Account successfully registered.',
       user: sanitized,
       token,
-      databaseRecord: {
-        table: 'users',
-        id: newUser.id,
-        storedHashPreview: `${hashedPassword.substring(0, 16)}...${hashedPassword.substring(hashedPassword.length - 8)}`,
-      },
     });
   } catch (error: any) {
     console.error('Error during registration:', error);
-    return res.status(500).json({ error: error.message || 'Registration failed' });
+    return res.status(500).json({ error: 'Registration failed. Please try again.' });
   }
 });
 
-// 2. Login Endpoint: Verifies credentials against users database table
+// 2. Login Endpoint: Verifies credentials with constant-time comparison
 app.post('/api/auth/login', (req, res) => {
   try {
     const { email, password } = req.body;
@@ -171,17 +137,9 @@ app.post('/api/auth/login', (req, res) => {
     const normalizedEmail = String(email).toLowerCase().trim();
     const user = usersDatabase.find((u) => u.email.toLowerCase() === normalizedEmail);
 
-    if (!user) {
+    if (!user || !verifyPassword(String(password), user.password, user.salt)) {
       return res.status(401).json({
-        error: `No registered account found with email "${normalizedEmail}". Check spelling or sign up.`,
-      });
-    }
-
-    // Verify hashed password
-    const isMatch = verifyPassword(password, user.password, user.salt);
-    if (!isMatch) {
-      return res.status(401).json({
-        error: 'Incorrect password. Verification against the database hash failed.',
+        error: 'Invalid email or password.',
       });
     }
 
@@ -194,33 +152,32 @@ app.post('/api/auth/login', (req, res) => {
       created_at: user.created_at,
     };
 
-    const token = `pos_jwt_${crypto.randomBytes(24).toString('hex')}`;
+    const token = `pos_session_${crypto.randomBytes(32).toString('hex')}`;
 
     return res.json({
       success: true,
-      message: 'Login successful. Password verified against database hash.',
+      message: 'Login successful.',
       user: sanitized,
       token,
     });
   } catch (error: any) {
     console.error('Error during login:', error);
-    return res.status(500).json({ error: error.message || 'Login failed' });
+    return res.status(500).json({ error: 'Login failed. Please try again.' });
   }
 });
 
-// 3. Database Explorer: Returns live SQL table structure & rows for audit & learning
+// 3. Restricted Admin Account Summary (Never exposes hashes or salts)
 app.get('/api/auth/users-table', (req, res) => {
-  res.json({
-    tableName: 'users',
-    sqlSchema: `CREATE TABLE users (\n    id INT AUTO_INCREMENT PRIMARY KEY,\n    name VARCHAR(100) NOT NULL,\n    email VARCHAR(100) NOT NULL UNIQUE,\n    password VARCHAR(255) NOT NULL,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);`,
+  const adminToken = String(req.headers['x-admin-session'] || '').trim();
+  if (!adminToken || !activeAdminSessions.has(adminToken)) {
+    return res.status(403).json({ error: 'Forbidden: Super Admin session required.' });
+  }
+  return res.json({
     totalUsers: usersDatabase.length,
     rows: usersDatabase.map((u) => ({
       id: u.id,
       name: u.name,
       email: u.email,
-      password_hash: u.password,
-      password_preview: `${u.password.substring(0, 16)}...`,
-      salt: u.salt,
       role: u.role,
       storeName: u.storeName,
       created_at: u.created_at,
@@ -228,40 +185,11 @@ app.get('/api/auth/users-table', (req, res) => {
   });
 });
 
-// 4. Live Hash Verifier Sandbox (Demonstrating how password hashing works)
-app.post('/api/auth/verify-hash', (req, res) => {
-  const { password, salt } = req.body;
-  if (!password) {
-    return res.status(400).json({ error: 'Password string is required.' });
-  }
-  const useSalt = salt || crypto.randomBytes(16).toString('hex');
-  const hash = hashPassword(password, useSalt);
-
-  return res.json({
-    algorithm: 'PBKDF2-HMAC-SHA512 (1000 iterations)',
-    inputLength: password.length,
-    salt: useSalt,
-    resultingHash: hash,
-    hashLength: hash.length,
-    explanation:
-      'The original plaintext password is never stored in the database. During login, this same algorithm computes the hash with the stored salt to verify equality.',
-  });
-});
-
-// Database Connection Status & System Health Hub
-app.get('/api/database/status', (req, res) => {
-  const start = Date.now();
+// System Health Hub (non-sensitive summary only)
+app.get('/api/database/status', (_req, res) => {
   return res.json({
     connected: true,
-    engine: 'SQLite / Cryptographic PBKDF2 DB Engine',
-    databaseName: 'apna_pos_production',
-    host: 'localhost',
-    port: PORT,
-    pingMs: Math.max(1, Date.now() - start),
-    tables: ['users', 'products', 'sales', 'khatas', 'attendance', 'staff_roles', 'audit_logs'],
-    totalUsers: usersDatabase.length,
     status: 'ONLINE_CONNECTED',
-    sslEncrypted: true,
     lastSync: new Date().toISOString(),
   });
 });
@@ -286,13 +214,13 @@ app.post('/api/auth/admin-otp/send', (req, res) => {
     if (normalized !== SUPER_ADMIN_EMAIL) {
       return res.status(403).json({
         success: false,
-        error: 'Access Denied: Email OTP lock is restricted exclusively to Super Admin (bashirsonselectric@gmail.com).',
+        error: 'Access Denied: Restricted to authorized Super Admin.',
       });
     }
 
-    // Generate random 6-digit numeric OTP code
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+    // Cryptographically strong 6-digit numeric OTP
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
 
     activeAdminOtp = {
       code: otpCode,
@@ -301,17 +229,16 @@ app.post('/api/auth/admin-otp/send', (req, res) => {
       attempts: 0,
     };
 
-    console.log(`[ADMIN OTP] New OTP generated for ${SUPER_ADMIN_EMAIL}: [${otpCode}] (Valid for 10 minutes)`);
-
+    const isDev = process.env.NODE_ENV !== 'production';
     return res.json({
       success: true,
       message: `A 6-digit security OTP code has been dispatched to ${SUPER_ADMIN_EMAIL}.`,
       expiresAt,
-      devPreviewOtp: otpCode,
+      ...(isDev ? { devPreviewOtp: otpCode } : {}),
       maskedEmail: 'b*************c@gmail.com',
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message || 'Failed to send OTP' });
+    return res.status(500).json({ success: false, error: 'Failed to send OTP' });
   }
 });
 
@@ -325,14 +252,14 @@ app.post('/api/auth/admin-otp/verify', (req, res) => {
     if (normalized !== SUPER_ADMIN_EMAIL) {
       return res.status(403).json({
         success: false,
-        error: 'Unauthorized: Admin panel access is restricted exclusively to bashirsonselectric@gmail.com.',
+        error: 'Unauthorized access.',
       });
     }
 
     if (!activeAdminOtp) {
       return res.status(400).json({
         success: false,
-        error: 'No active OTP found. Please click "Send OTP" to generate a new verification code.',
+        error: 'No active OTP found. Please request a new verification code.',
       });
     }
 
@@ -352,7 +279,11 @@ app.post('/api/auth/admin-otp/verify', (req, res) => {
       });
     }
 
-    if (activeAdminOtp.code !== code) {
+    const expectedBuf = Buffer.from(activeAdminOtp.code);
+    const providedBuf = Buffer.from(code);
+    const isMatch = expectedBuf.length === providedBuf.length && crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+    if (!isMatch) {
       activeAdminOtp.attempts++;
       return res.status(400).json({
         success: false,
@@ -360,9 +291,9 @@ app.post('/api/auth/admin-otp/verify', (req, res) => {
       });
     }
 
-    // OTP Verified! Clear active OTP and grant token
     activeAdminOtp = null;
     const sessionToken = `admin_session_${crypto.randomBytes(32).toString('hex')}`;
+    activeAdminSessions.add(sessionToken);
 
     return res.json({
       success: true,
@@ -372,53 +303,47 @@ app.post('/api/auth/admin-otp/verify', (req, res) => {
       verifiedAt: new Date().toISOString(),
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message || 'OTP verification failed' });
+    return res.status(500).json({ success: false, error: 'OTP verification failed' });
   }
 });
 
-// Supabase Connection Status
-app.get('/api/supabase/status', (req, res) => {
-  const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-  const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
-
-  return res.json({
-    hasServerConfig: Boolean(envUrl && envKey),
-    urlPreview: envUrl ? `${envUrl.substring(0, 18)}...` : null,
-    backendStatus: 'READY_TO_CONNECT',
-  });
-});
-
-
-// Staff Registration Endpoint: Saves staff credentials with email, password, role into users database
+// Staff Registration Endpoint: Saves staff credentials with scrypt hash (never returns plaintext password)
 app.post('/api/auth/register-staff', (req, res) => {
   try {
-    const { name, email, password, role = 'cashier', phone = '', branch = 'Counter #1' } = req.body;
+    const { name, email, password, role = 'cashier', branch = 'Counter #1' } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required for staff registration.' });
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Invalid staff email address.' });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Staff password must be at least 6 characters long.' });
+    }
 
-    // Check if email already exists
+    const safeRole = ALLOWED_STAFF_ROLES.has(String(role)) ? (String(role) as 'manager' | 'cashier') : 'cashier';
+
     const existing = usersDatabase.find((u) => u.email.toLowerCase() === normalizedEmail);
     if (existing) {
       return res.status(409).json({
-        error: `Staff with email "${normalizedEmail}" is already registered. Use a different email or update their password.`,
+        error: 'A staff account with this email is already registered.',
       });
     }
 
     const salt = crypto.randomBytes(16).toString('hex');
-    const hashedPassword = hashPassword(password, salt);
+    const hashedPassword = hashPassword(String(password), salt);
 
     const newUser: UserRow = {
       id: nextUserId++,
-      name: String(name).trim(),
+      name: String(name).trim().slice(0, 120),
       email: normalizedEmail,
       password: hashedPassword,
       salt,
-      role: role as any,
-      storeName: branch ? `Branch: ${branch}` : 'Retail Branch',
+      role: safeRole,
+      storeName: branch ? `Branch: ${String(branch).trim().slice(0, 120)}` : 'Retail Branch',
       created_at: new Date().toISOString(),
     };
 
@@ -426,7 +351,7 @@ app.post('/api/auth/register-staff', (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: `Staff member "${name}" registered successfully as ${role.toUpperCase()}.`,
+      message: `Staff member "${newUser.name}" registered successfully as ${safeRole.toUpperCase()}.`,
       user: {
         id: newUser.id,
         name: newUser.name,
@@ -434,34 +359,15 @@ app.post('/api/auth/register-staff', (req, res) => {
         role: newUser.role,
         storeName: newUser.storeName,
         created_at: newUser.created_at,
-        clearPasswordPreview: password, // For owner reference slip
       },
-      table: 'users',
     });
   } catch (error: any) {
     console.error('Error during staff registration:', error);
-    return res.status(500).json({ error: error.message || 'Staff registration failed' });
+    return res.status(500).json({ error: 'Staff registration failed' });
   }
 });
 
-// Staff List Endpoint: Returns all registered staff users
-app.get('/api/auth/staff-users', (req, res) => {
-  try {
-    const staff = usersDatabase.map((u) => ({
-      id: String(u.id),
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      storeName: u.storeName,
-      created_at: u.created_at,
-    }));
-    return res.json({ staff });
-  } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to fetch staff users' });
-  }
-});
-
-// 5. Change Password Endpoint (Updates database password hash with new cryptographic salt)
+// Change Password Endpoint (Verifies current password before updating scrypt hash)
 app.post('/api/auth/change-password', (req, res) => {
   try {
     const { email, currentPassword, newPassword } = req.body;
@@ -477,31 +383,22 @@ app.post('/api/auth/change-password', (req, res) => {
     const normalizedEmail = String(email).toLowerCase().trim();
     const user = usersDatabase.find((u) => u.email.toLowerCase() === normalizedEmail);
 
-    if (!user) {
-      return res.status(404).json({ error: 'User account not found in database.' });
+    if (!user || !verifyPassword(String(currentPassword), user.password, user.salt)) {
+      return res.status(401).json({ error: 'Current password verification failed.' });
     }
 
-    // Verify current password against database hash
-    const isCurrentValid = verifyPassword(currentPassword, user.password, user.salt);
-    if (!isCurrentValid) {
-      return res.status(401).json({ error: 'Current password verification failed. Please try again.' });
-    }
-
-    // Generate new salt and compute new hash
     const newSalt = crypto.randomBytes(16).toString('hex');
-    const newHashedPassword = hashPassword(newPassword, newSalt);
-
-    user.password = newHashedPassword;
+    user.password = hashPassword(String(newPassword), newSalt);
     user.salt = newSalt;
 
     return res.json({
       success: true,
-      message: 'Password successfully updated in users database.',
+      message: 'Password updated successfully.',
       updatedAt: new Date().toISOString(),
     });
   } catch (error: any) {
     console.error('Error changing password:', error);
-    return res.status(500).json({ error: error.message || 'Failed to change password' });
+    return res.status(500).json({ error: 'Failed to change password' });
   }
 });
 
@@ -1949,13 +1846,16 @@ app.get('/api/health', (req, res) => {
 
 // Mount Vite middleware in development or static serve in production
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: {
         middlewareMode: true,
         host: '0.0.0.0',
-        port: PORT,
+        hmr: { server: httpServer },
+        ws: { server: httpServer },
       },
       appType: 'spa',
     });
@@ -1967,7 +1867,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Apna AI POS server running on http://0.0.0.0:${PORT}`);
   });
 }

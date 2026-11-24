@@ -1,33 +1,26 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   TrendingUp,
-  DollarSign,
-  CreditCard,
-  RotateCcw,
-  AlertTriangle,
-  Package,
-  ArrowUpRight,
-  ArrowDownRight,
-  Calendar,
   ShoppingBag,
-  UserCheck,
-  Sparkles,
+  Package,
+  AlertTriangle,
+  CreditCard,
   Printer,
-  ChevronRight,
   ShieldCheck,
-  RefreshCw,
-  CheckCircle2,
-  Trash2,
-  MessageCircle,
-  LayoutDashboard,
-  Zap,
+  ArrowUpRight,
+  Wallet,
+  Sparkles,
+  BarChart3,
+  Award,
+  Tag,
 } from 'lucide-react';
 import { usePos } from '../../context/PosContext';
-import { CryptoinModularDashboard } from './CryptoinModularDashboard';
 
 interface DashboardViewProps {
   onNavigate: (tab: any) => void;
 }
+
+type DateFilter = 'today' | 'week' | 'month' | 'all';
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const {
@@ -35,618 +28,485 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     khatas,
     totalUdhar,
     returns,
-    products,
-    totalStockCost,
-    totalStockRetail,
+    filteredProducts,
+    expenses,
     outOfStockItems,
     lowStockItems,
-    triggerAiManagerWhatsApp,
+    loyaltyPointsMap,
+    coupons,
     storeProfile,
-    resetAllData,
-    loadDemoSampleData,
     setCurrentReceipt,
+    userSession,
   } = usePos();
 
-  // Active Layout: Default is 'cryptoin' (the requested Obsidian Purple Modular Layout from the screenshot)
-  const [activeLayout, setActiveLayout] = useState<'cryptoin' | 'classic'>(() => {
-    try {
-      const saved = localStorage.getItem('godigly_active_dashboard_layout');
-      return saved === 'classic' ? 'classic' : 'cryptoin';
-    } catch {
-      return 'cryptoin';
-    }
-  });
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
 
-  const handleSwitchLayout = (layout: 'cryptoin' | 'classic') => {
-    setActiveLayout(layout);
-    localStorage.setItem('godigly_active_dashboard_layout', layout);
-  };
+  const isMasterAdmin = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
 
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month'>('today');
-  const [isTriggeringAi, setIsTriggeringAi] = useState(false);
-  const [aiSuccessMsg, setAiSuccessMsg] = useState<string | null>(null);
-  const [zeroFeedback, setZeroFeedback] = useState<string | null>(null);
-
-
-  const handleZeroBalances = () => {
-    resetAllData();
-    setZeroFeedback('All sales, returns, udhar, and balances reset to clean 0!');
-    setTimeout(() => setZeroFeedback(null), 4000);
-  };
-
-  const handleLoadDemo = () => {
-    loadDemoSampleData();
-    setZeroFeedback('Demo hardware store data loaded for test exploration.');
-    setTimeout(() => setZeroFeedback(null), 4000);
-  };
-
-  const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
   const thisMonthStr = todayStr.slice(0, 7);
+  const weekAgo = new Date(now);
+  weekAgo.setDate(now.getDate() - 6);
+  const weekAgoStr = weekAgo.toISOString().split('T')[0];
 
-  // Filtered sales
-  const filteredSales = sales.filter((s) => {
-    if (dateFilter === 'today') return s.timestamp.startsWith(todayStr);
-    if (dateFilter === 'month') return s.timestamp.startsWith(thisMonthStr);
+  const matchesRange = (dateStr: string) => {
+    if (!dateStr) return false;
+    const day = dateStr.slice(0, 10);
+    if (dateFilter === 'today') return day === todayStr;
+    if (dateFilter === 'week') return day >= weekAgoStr;
+    if (dateFilter === 'month') return day.startsWith(thisMonthStr);
     return true;
-  });
-
-  const totalSalesAmount = filteredSales.reduce((acc, s) => acc + s.grandTotal, 0);
-  const totalNetProfit = filteredSales.reduce((acc, s) => acc + (s.profit || 0), 0);
-  const totalOrdersCount = filteredSales.length;
-
-  // Recovery (Vasooli) from Khata entries (receive_payment)
-  const totalRecovery = khatas.reduce((acc, k) => {
-    const receivedEntries = k.transactions.filter((t) => {
-      if (t.type !== 'receive_payment') return false;
-      if (dateFilter === 'today') return t.date.startsWith(todayStr);
-      if (dateFilter === 'month') return t.date.startsWith(thisMonthStr);
-      return true;
-    });
-    return acc + receivedEntries.reduce((sub, entry) => sub + entry.amount, 0);
-  }, 0);
-
-  // Returns filtered
-  const filteredReturns = returns.filter((r) => {
-    if (dateFilter === 'today') return r.date.startsWith(todayStr);
-    if (dateFilter === 'month') return r.date.startsWith(thisMonthStr);
-    return true;
-  });
-  const totalReturnsAmount = filteredReturns.reduce((acc, r) => acc + r.totalRefundAmount, 0);
-  const totalReturnsCount = filteredReturns.length;
-
-  // Payment Breakdown
-  const cashSales = filteredSales.filter((s) => s.paymentMethod === 'cash').reduce((acc, s) => acc + s.grandTotal, 0);
-  const digitalSales = filteredSales.filter((s) => ['card', 'easypaisa', 'jazzcash', 'raast', 'bank'].includes(s.paymentMethod)).reduce((acc, s) => acc + s.grandTotal, 0);
-  const udharSales = filteredSales.filter((s) => s.paymentMethod === 'udhar').reduce((acc, s) => acc + s.grandTotal, 0);
-
-  const handleTriggerAiReport = async () => {
-    setIsTriggeringAi(true);
-    setAiSuccessMsg(null);
-    try {
-      const res = await triggerAiManagerWhatsApp('daily_sales');
-      setAiSuccessMsg('Daily WhatsApp report ready! Opening link...');
-      window.open(res.whatsappLink, '_blank');
-    } catch {
-      setAiSuccessMsg('WhatsApp report dispatched');
-    } finally {
-      setIsTriggeringAi(false);
-      setTimeout(() => setAiSuccessMsg(null), 4000);
-    }
   };
+
+  const filteredSales = useMemo(() => sales.filter((s) => matchesRange(s.timestamp)), [sales, dateFilter]);
+  const filteredReturns = useMemo(() => returns.filter((r) => matchesRange(r.date)), [returns, dateFilter]);
+  const filteredExpenses = useMemo(() => expenses.filter((e) => matchesRange(e.date)), [expenses, dateFilter]);
+
+  const todayRevenue = useMemo(
+    () => sales.filter((s) => s.timestamp.startsWith(todayStr)).reduce((acc, s) => acc + s.grandTotal, 0),
+    [sales, todayStr]
+  );
+  const totalRevenue = useMemo(() => filteredSales.reduce((acc, s) => acc + s.grandTotal, 0), [filteredSales]);
+  const grossProfit = useMemo(() => filteredSales.reduce((acc, s) => acc + (s.profit || 0), 0), [filteredSales]);
+  const totalRefunds = useMemo(() => filteredReturns.reduce((acc, r) => acc + r.totalRefundAmount, 0), [filteredReturns]);
+  const totalExpenses = useMemo(() => filteredExpenses.reduce((acc, e) => acc + e.amount, 0), [filteredExpenses]);
+  const netProfit = grossProfit - totalExpenses - totalRefunds;
+
+  // Payment breakdown
+  const cashSales = filteredSales.filter((s) => s.paymentMethod === 'cash').reduce((a, s) => a + s.grandTotal, 0);
+  const cardAndBank = filteredSales
+    .filter((s) => ['card', 'bank_transfer'].includes(s.paymentMethod))
+    .reduce((a, s) => a + s.grandTotal, 0);
+  const walletAndSplit = filteredSales
+    .filter((s) => ['easypaisa', 'jazzcash', 'split'].includes(s.paymentMethod))
+    .reduce((a, s) => a + s.grandTotal, 0);
+  const udharSales = filteredSales.filter((s) => s.paymentMethod === 'udhar').reduce((a, s) => a + s.grandTotal, 0);
+
+  // 7-Day Real Revenue Curve
+  const last7Days = useMemo(() => {
+    const days: { label: string; dateKey: string; revenue: number; orders: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateKey = d.toISOString().split('T')[0];
+      const daySales = sales.filter((s) => s.timestamp.startsWith(dateKey));
+      days.push({
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        dateKey,
+        revenue: daySales.reduce((acc, s) => acc + s.grandTotal, 0),
+        orders: daySales.length,
+      });
+    }
+    return days;
+  }, [sales]);
+
+  const maxDayRevenue = Math.max(...last7Days.map((d) => d.revenue), 1);
+
+  const loyaltyCount = Object.keys(loyaltyPointsMap).length;
+  const activeCoupons = coupons.filter((c) => c.active).length;
+  const activeUdharCount = khatas.filter((k) => k.currentBalance > 0).length;
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Header & Layout Switcher Bar */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-[#171825] p-5 rounded-3xl border border-white/5 shadow-2xl">
+    <div className="space-y-6 pb-8">
+      {/* Editorial Top Header */}
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 pb-5 border-b border-[#E8E0D8] dark:border-[#2E2A26]">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-purple-600/30 text-purple-400 flex items-center justify-center font-black">
-              <Zap className="w-4 h-4 text-purple-400" />
-            </div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-              GoDigly POS Dashboard
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40">
-              Active Layout
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Dark-themed modular layout with real-time sales curves, register balance, and fast checkout terminal for <strong className="text-purple-300 font-semibold">{storeProfile.name}</strong>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7D6E65] dark:text-[#A89E96]">
+            Atelier Performance Summary
+          </p>
+          <h1 className="font-editorial text-2xl sm:text-3xl font-semibold text-[#141414] dark:text-[#F6F1EB] mt-1">
+            {storeProfile.name}
+          </h1>
+          <p className="text-xs text-[#6B625C] dark:text-[#A89E96] mt-1">
+            Daily revenue summary, real-time stock health, and client loyalty activity.
           </p>
         </div>
 
-        <div className="flex items-center flex-wrap gap-2 w-full md:w-auto">
-          {/* Layout Mode Switcher */}
-          <div className="flex items-center bg-[#10111a] p-1 rounded-2xl border border-white/5 text-xs font-bold">
-            <button
-              onClick={() => handleSwitchLayout('cryptoin')}
-              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeLayout === 'cryptoin'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 font-extrabold'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span>Obsidian Purple (Active)</span>
-            </button>
-            <button
-              onClick={() => handleSwitchLayout('classic')}
-              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeLayout === 'classic'
-                  ? 'bg-slate-800 text-white shadow-xs font-bold'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>Classic Grid</span>
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center p-1 rounded-xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] text-xs font-semibold">
+            {(
+              [
+                { id: 'today', label: 'Today' },
+                { id: 'week', label: '7 Days' },
+                { id: 'month', label: 'Month' },
+                { id: 'all', label: 'All Time' },
+              ] as { id: DateFilter; label: string }[]
+            ).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setDateFilter(f.id)}
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                  dateFilter === f.id
+                    ? 'bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414]'
+                    : 'text-[#6B625C] dark:text-[#A89E96] hover:text-[#141414] dark:hover:text-white'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
 
-          {/* Quick Zero All Balances Action */}
           <button
-            onClick={handleZeroBalances}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#10111a] hover:bg-rose-950/40 text-slate-300 hover:text-rose-400 border border-white/5 rounded-2xl text-xs font-bold transition-all shadow-2xs active:scale-95"
-            title="Reset store metrics: sales, returns, udhar, and stock to strictly 0"
+            type="button"
+            onClick={() => onNavigate('pos')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414] text-xs font-semibold transition-colors cursor-pointer"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
-            <span>Reset 0 Balance</span>
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Open POS Counter</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('ai_hub')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#1A1816] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] text-[#141414] dark:text-[#F6F1EB] text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#7D6E65]" />
+            <span>AI Scanner</span>
           </button>
         </div>
       </div>
 
-      {/* ACTIVE LAYOUT: Cryptoin Modular Layout (Matches attached screenshot) */}
-      {activeLayout === 'cryptoin' ? (
-        <CryptoinModularDashboard onNavigate={onNavigate} />
-      ) : (
-        <>
-          {/* Classic Grid Filter Bar */}
-          <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
-              <button
-                onClick={() => setDateFilter('today')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  dateFilter === 'today'
-                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                onClick={() => setDateFilter('month')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  dateFilter === 'month'
-                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                This Month
-              </button>
-              <button
-                onClick={() => setDateFilter('all')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  dateFilter === 'all'
-                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                All Time
-              </button>
-            </div>
-
-            <button
-              onClick={handleTriggerAiReport}
-              disabled={isTriggeringAi}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {isTriggeringAi ? 'Generating AI...' : 'AI Daily WhatsApp'}
-            </button>
-          </div>
-
-
-      {/* Zero Feedback Toast */}
-      {zeroFeedback && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-200 text-xs font-semibold flex items-center justify-between shadow-xs">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>{zeroFeedback}</span>
-          </div>
-          <button onClick={() => setZeroFeedback(null)} className="text-emerald-700 dark:text-emerald-400 hover:underline">Dismiss</button>
-        </div>
-      )}
-
-      {aiSuccessMsg && (
-        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-300 text-xs font-medium flex items-center justify-between">
-          <span>{aiSuccessMsg}</span>
-          <button onClick={() => setAiSuccessMsg(null)} className="text-emerald-600 dark:text-emerald-400 hover:underline">Dismiss</button>
-        </div>
-      )}
-
-      {/* Fresh New User 0-Balance Banner */}
-      {sales.length === 0 && khatas.length === 0 && returns.length === 0 && (
-        <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      {/* Super Admin Control Center Card — Strictly ONLY for bashirsonselectric@gmail.com */}
+      {isMasterAdmin && (
+        <div className="rounded-2xl border border-[#E5C6C3] dark:border-[#533836] bg-[#F3E1DF]/55 dark:bg-[#342322]/60 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-lg shrink-0">
-              0
+            <div className="w-9 h-9 rounded-xl bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                New Store Ready • 0 Balance Baseline
+              <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                Super Admin Control Center
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                All sales (Rs 0), returns (Rs 0), and udhar khatta (Rs 0) are completely clear. Start billing customers or load sample hardware data.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 self-end sm:self-center">
-            <button
-              onClick={() => onNavigate('pos')}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
-            >
-              + First Bill (F2)
-            </button>
-            <button
-              onClick={handleLoadDemo}
-              className="px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-emerald-600 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold transition-all"
-            >
-              Load Demo Store
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Primary KPI Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Sales */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Sales</span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-              <ShoppingBag className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-slate-900 dark:text-white font-mono-numbers">
-              Rs {totalSalesAmount.toLocaleString()}
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400">
-              <span className="font-semibold text-indigo-600 dark:text-indigo-400">{totalOrdersCount}</span> billed invoices
-            </div>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-indigo-500/5 rounded-full pointer-events-none" />
-        </div>
-
-        {/* Net Profit */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Net Profit</span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono-numbers">
-              Rs {totalNetProfit.toLocaleString()}
-            </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              <span>{totalSalesAmount > 0 ? ((totalNetProfit / totalSalesAmount) * 100).toFixed(1) : '0'}% margin</span>
-            </div>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-emerald-500/5 rounded-full pointer-events-none" />
-        </div>
-
-        {/* Total Udhar / Credit Ledger */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Udhar Khatta</span>
-            <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-              <CreditCard className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono-numbers">
-              Rs {totalUdhar.toLocaleString()}
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400">
-              <span className="font-semibold text-amber-600 dark:text-amber-400">{khatas.filter((k) => k.currentBalance > 0).length}</span> customers with balance
-            </div>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-amber-500/5 rounded-full pointer-events-none" />
-        </div>
-
-        {/* Recovery (Vasooli) */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Recovery (Vasooli)</span>
-            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-              <UserCheck className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-teal-600 dark:text-teal-400 font-mono-numbers">
-              Rs {totalRecovery.toLocaleString()}
-            </div>
-            <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Udhar cash collected into drawer
-            </div>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-teal-500/5 rounded-full pointer-events-none" />
-        </div>
-      </div>
-
-      {/* Secondary Row: Returns, Inventory Asset Value, Stock Warning & Fast Channels */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Returns & Refunds */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-500 dark:text-rose-400">Returns & Refunds</span>
-            <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-              <RotateCcw className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-bold text-rose-600 dark:text-rose-400 font-mono-numbers">
-              Rs {totalReturnsAmount.toLocaleString()}
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {totalReturnsCount} returned transactions
-            </div>
-          </div>
-        </div>
-
-        {/* Total Inventory Stock Value */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Stock Retail Value</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <Package className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-bold text-slate-900 dark:text-white font-mono-numbers">
-              Rs {totalStockRetail.toLocaleString()}
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Cost: Rs {totalStockCost.toLocaleString()} ({products.length} products)
-            </div>
-          </div>
-        </div>
-
-        {/* Stock Alerts */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Critical Stockouts</span>
-            <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/70 text-red-600 dark:text-red-400 flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2">
-            <div className="text-xl font-bold text-red-600 dark:text-red-400 font-mono-numbers">
-              {outOfStockItems.length} items 0 stock
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {lowStockItems.length} items low inventory
-            </div>
-          </div>
-        </div>
-
-        {/* Payment Channels Split */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Revenue Channels</span>
-          <div className="mt-2 space-y-1.5 text-xs">
-            <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
-              <span>Cash:</span>
-              <span className="font-bold font-mono-numbers">Rs {cashSales.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center text-indigo-600 dark:text-indigo-400">
-              <span>Digital/QR:</span>
-              <span className="font-bold font-mono-numbers">Rs {digitalSales.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center text-amber-600 dark:text-amber-400">
-              <span>Udhar (Credit):</span>
-              <span className="font-bold font-mono-numbers">Rs {udharSales.toLocaleString()}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Launchpad & Fast Actions */}
-      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white p-6 rounded-2xl shadow-md">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold">Quick Operations Hub</h2>
-            <p className="text-xs text-indigo-200 mt-0.5">Jump directly to billing counter, customer returns, udhar recovery, or inventory</p>
-          </div>
-          <div className="flex flex-wrap gap-2.5">
-            <button
-              onClick={() => onNavigate('pos')}
-              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow-xs transition-transform active:scale-95 flex items-center gap-1.5"
-            >
-              <ShoppingBag className="w-4 h-4" />
-              New Sale (POS)
-            </button>
-            <button
-              onClick={() => onNavigate('returns')}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Process Return
-            </button>
-            <button
-              onClick={() => onNavigate('khata')}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
-            >
-              <CreditCard className="w-4 h-4" />
-              Udhar Khatta
-            </button>
-            <button
-              onClick={() => onNavigate('ai_manager')}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-1.5"
-            >
-              <Sparkles className="w-4 h-4" />
-              AI Manager WhatsApp
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Two Column Layout: Recent Sales & Top Udhar Debtors */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Invoices */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-              <ShoppingBag className="w-4 h-4 text-indigo-500" />
-              Recent Billed Invoices
-            </h3>
-            <button
-              onClick={() => onNavigate('sales')}
-              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 font-semibold"
-            >
-              View All <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="divide-y divide-slate-100 dark:divide-slate-800 mt-2">
-            {sales.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400 dark:text-slate-500">
-                No invoices recorded yet. Start billing in POS tab!
+              <div className="text-[11px] text-[#6B625C] dark:text-[#C9BFB6]">
+                Owner-only controls locked to {userSession.email} — strictly hidden from regular user accounts.
               </div>
-            ) : (
-              sales.slice(0, 5).map((sale) => (
-                <div
-                  key={sale.id}
-                  onClick={() => setCurrentReceipt(sale)}
-                  className="py-2.5 px-2 -mx-2 rounded-xl flex items-center justify-between text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors group"
-                  title="Click to view & send bill image on WhatsApp"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800 dark:text-slate-200 font-mono-numbers">
-                        {sale.invoiceNo}
-                      </span>
-                      <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800 px-1.5 py-0.2 rounded font-bold inline-flex items-center gap-0.5">
-                        <MessageCircle className="w-2.5 h-2.5" /> WhatsApp Bill
-                      </span>
-                    </div>
-                    <span className="text-slate-400 dark:text-slate-500 text-[11px]">
-                      {new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <div className="text-slate-500 dark:text-slate-400 text-[11px]">
-                      {sale.customerName ? `${sale.customerName} • ` : ''}
-                      {sale.items.length} items ({sale.paymentMethod.toUpperCase()})
-                    </div>
-                  </div>
-                  <div className="text-right flex items-center gap-2">
-                    <div>
-                      <div className="font-black text-slate-900 dark:text-white font-mono-numbers">
-                        Rs {sale.grandTotal.toLocaleString()}
-                      </div>
-                      {sale.profit !== undefined && (
-                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                          +Rs {sale.profit.toLocaleString()} profit
-                        </span>
-                      )}
-                    </div>
-                    <span className="p-1 rounded-lg bg-emerald-50 group-hover:bg-emerald-600 text-emerald-700 group-hover:text-white transition-colors">
-                      <MessageCircle className="w-3.5 h-3.5" />
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Top Udhar Khatta Pending Recovery */}
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-            <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-sm">
-              <CreditCard className="w-4 h-4 text-amber-500" />
-              Highest Pending Udhar (Needs Recovery)
-            </h3>
-            <button
-              onClick={() => onNavigate('khata')}
-              className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5 font-semibold"
-            >
-              Open Khatta <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="divide-y divide-slate-100 dark:divide-slate-800 mt-2">
-            {khatas.filter((k) => k.currentBalance > 0).length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400 dark:text-slate-500">
-                Clean ledger! No customers currently owe udhar.
-              </div>
-            ) : (
-              khatas
-                .filter((k) => k.currentBalance > 0)
-                .sort((a, b) => b.currentBalance - a.currentBalance)
-                .slice(0, 5)
-                .map((khata) => {
-                  const percentOfLimit = Math.round((khata.currentBalance / khata.creditLimit) * 100);
-                  return (
-                    <div key={khata.id} className="py-2.5 flex items-center justify-between text-xs">
-                      <div>
-                        <div className="font-bold text-slate-800 dark:text-slate-200">
-                          {khata.name}
-                        </div>
-                        <div className="text-slate-400 dark:text-slate-500 text-[11px]">
-                          {khata.phone} • Limit: Rs {khata.creditLimit.toLocaleString()}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-black text-amber-600 dark:text-amber-400 font-mono-numbers">
-                          Rs {khata.currentBalance.toLocaleString()}
-                        </div>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                          percentOfLimit >= 100
-                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
-                            : percentOfLimit >= 75
-                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300'
-                            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
-                        }`}>
-                          {percentOfLimit}% limit
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-            )}
-          </div>
-        </div>
-
-        {/* Super Admin Access Banner on User Dashboard */}
-        <div className="bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900 p-5 rounded-3xl border border-purple-500/40 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-purple-600/30 text-purple-300 flex items-center justify-center border border-purple-500/40 shrink-0">
-              <ShieldCheck className="w-5 h-5 text-purple-300" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="font-extrabold text-sm text-white">Super Admin Control Center (سپر ایڈمن پینل)</h4>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300 font-bold border border-purple-400/30">
-                  Email OTP Lock
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Protected admin access for <strong>bashirsonselectric@gmail.com</strong>. Manage Supabase database, system limits & multi-user data.
-              </p>
             </div>
           </div>
           <button
             type="button"
             onClick={() => onNavigate('admin')}
-            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-purple-600/40 transition-all shrink-0 cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
           >
-            Open Admin Panel
+            <span>Open Admin Panel</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>
-      </div>
-        </>
       )}
+
+      {/* Primary KPI Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5">
+          <div className="flex items-center justify-between text-xs text-[#7D6E65] dark:text-[#A89E96]">
+            <span className="font-medium">Daily Revenue</span>
+            <TrendingUp className="w-4 h-4 text-[#2F6B4F] dark:text-[#6EE7B7]" />
+          </div>
+          <div className="mt-2.5 text-2xl font-bold font-mono-numbers text-[#141414] dark:text-[#F6F1EB]">
+            {storeProfile.currency} {todayRevenue.toLocaleString()}
+          </div>
+          <div className="mt-1.5 text-[11px] text-[#7D6E65] dark:text-[#A89E96]">
+            Selected period:{' '}
+            <span className="font-mono-numbers font-semibold text-[#141414] dark:text-[#F6F1EB]">
+              {storeProfile.currency} {totalRevenue.toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5">
+          <div className="flex items-center justify-between text-xs text-[#7D6E65] dark:text-[#A89E96]">
+            <span className="font-medium">Orders Completed</span>
+            <ShoppingBag className="w-4 h-4 text-[#141414] dark:text-[#E5C6C3]" />
+          </div>
+          <div className="mt-2.5 text-2xl font-bold font-mono-numbers text-[#141414] dark:text-[#F6F1EB]">
+            {filteredSales.length.toLocaleString()}
+          </div>
+          <div className="mt-1.5 text-[11px] text-[#7D6E65] dark:text-[#A89E96]">
+            Avg basket:{' '}
+            <span className="font-mono-numbers font-semibold text-[#141414] dark:text-[#F6F1EB]">
+              {storeProfile.currency}{' '}
+              {filteredSales.length > 0 ? Math.round(totalRevenue / filteredSales.length).toLocaleString() : '0'}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5">
+          <div className="flex items-center justify-between text-xs text-[#7D6E65] dark:text-[#A89E96]">
+            <span className="font-medium">Net Boutique Margin</span>
+            <Wallet className="w-4 h-4 text-[#2F6B4F] dark:text-[#6EE7B7]" />
+          </div>
+          <div
+            className={`mt-2.5 text-2xl font-bold font-mono-numbers ${
+              netProfit >= 0 ? 'text-[#2F6B4F] dark:text-[#6EE7B7]' : 'text-[#9B2C2C] dark:text-[#FCA5A5]'
+            }`}
+          >
+            {storeProfile.currency} {netProfit.toLocaleString()}
+          </div>
+          <div className="mt-1.5 text-[11px] text-[#7D6E65] dark:text-[#A89E96]">
+            Expenses {storeProfile.currency} {totalExpenses.toLocaleString()} · Refunds {storeProfile.currency}{' '}
+            {totalRefunds.toLocaleString()}
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5">
+          <div className="flex items-center justify-between text-xs text-[#7D6E65] dark:text-[#A89E96]">
+            <span className="font-medium">Collection &amp; Stock</span>
+            <Package className="w-4 h-4 text-[#9A6B2F] dark:text-[#F1D29B]" />
+          </div>
+          <div className="mt-2.5 text-2xl font-bold font-mono-numbers text-[#141414] dark:text-[#F6F1EB]">
+            {filteredProducts.length.toLocaleString()}{' '}
+            <span className="text-xs font-normal text-[#8A7E75]">pieces</span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-3 text-[11px]">
+            <button
+              type="button"
+              onClick={() => onNavigate('stock')}
+              className="text-[#9A6B2F] dark:text-[#F1D29B] font-semibold hover:underline cursor-pointer"
+            >
+              {lowStockItems.length} low stock
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('inventory')}
+              className="text-[#9B2C2C] dark:text-[#FCA5A5] font-semibold hover:underline cursor-pointer"
+            >
+              {outOfStockItems.length} sold out
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Analytics Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* 7-Day Sales Performance */}
+        <div className="lg:col-span-2 rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5 flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-editorial text-lg font-semibold text-[#141414] dark:text-[#F6F1EB] flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-[#7D6E65]" />
+                <span>7-Day Sales Analytics</span>
+              </h2>
+              <p className="text-[11px] text-[#7D6E65] dark:text-[#A89E96]">
+                Completed checkout totals across the past 7 days
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('analytics')}
+              className="text-xs font-semibold text-[#141414] dark:text-[#E5C6C3] hover:underline cursor-pointer"
+            >
+              Full Report →
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-2.5 items-end h-44 pt-4">
+            {last7Days.map((day) => {
+              const heightPct = day.revenue > 0 ? Math.max(12, Math.round((day.revenue / maxDayRevenue) * 100)) : 6;
+              return (
+                <div key={day.dateKey} className="flex flex-col items-center gap-1.5 h-full justify-end">
+                  <div className="text-[10px] font-mono-numbers text-[#7D6E65] dark:text-[#A89E96]">
+                    {day.revenue > 0 ? `${Math.round(day.revenue / 1000)}k` : '0'}
+                  </div>
+                  <div className="w-full flex-1 flex items-end">
+                    <div
+                      className={`w-full rounded-t-xl transition-all ${
+                        day.revenue > 0
+                          ? 'bg-[#141414] dark:bg-[#F3E1DF]'
+                          : 'bg-[#EFE8E0] dark:bg-[#282420]'
+                      }`}
+                      style={{ height: `${heightPct}%` }}
+                      title={`${day.dateKey}: ${storeProfile.currency} ${day.revenue.toLocaleString()} (${day.orders} orders)`}
+                    />
+                  </div>
+                  <div className="text-[11px] font-medium text-[#6B625C] dark:text-[#A89E96]">{day.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Payment Mix, Loyalty & Promotions Card */}
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5 space-y-4">
+          <h2 className="font-editorial text-lg font-semibold text-[#141414] dark:text-[#F6F1EB]">
+            Payment &amp; Client Mix
+          </h2>
+
+          <div className="space-y-2.5 text-xs">
+            <div className="flex items-center justify-between py-1.5 border-b border-[#EFE8E0] dark:border-[#2A2622]">
+              <span className="text-[#6B625C] dark:text-[#A89E96]">Cash</span>
+              <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {storeProfile.currency} {cashSales.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-[#EFE8E0] dark:border-[#2A2622]">
+              <span className="text-[#6B625C] dark:text-[#A89E96]">Card &amp; Bank Transfer</span>
+              <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {storeProfile.currency} {cardAndBank.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5 border-b border-[#EFE8E0] dark:border-[#2A2622]">
+              <span className="text-[#6B625C] dark:text-[#A89E96]">Digital Wallet &amp; Split</span>
+              <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {storeProfile.currency} {walletAndSplit.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <span className="text-[#6B625C] dark:text-[#A89E96]">Store Credit ({activeUdharCount})</span>
+              <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {storeProfile.currency} {(udharSales || totalUdhar).toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate('vip_customers')}
+              className="p-3 rounded-xl bg-[#FAF7F4] dark:bg-[#221F1C] border border-[#E8E0D8] dark:border-[#2E2A26] text-left hover:border-[#141414]/40 cursor-pointer"
+            >
+              <Award className="w-4 h-4 text-[#7D6E65] mb-1" />
+              <div className="font-mono-numbers text-base font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {loyaltyCount}
+              </div>
+              <div className="text-[10px] text-[#7D6E65]">Loyalty Members</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('promotions')}
+              className="p-3 rounded-xl bg-[#F3E1DF]/55 dark:bg-[#342322] border border-[#E5C6C3] dark:border-[#533836] text-left hover:border-[#141414]/40 cursor-pointer"
+            >
+              <Tag className="w-4 h-4 text-[#141414] dark:text-[#F3E1DF] mb-1" />
+              <div className="font-mono-numbers text-base font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {activeCoupons}
+              </div>
+              <div className="text-[10px] text-[#6B625C] dark:text-[#C9BFB6]">Active Promos</div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Row: Low Stock Alerts + Recent Boutique Sales */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Low Stock Alerts */}
+        <div className="rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-editorial text-base font-semibold text-[#141414] dark:text-[#F6F1EB] flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-[#9A6B2F]" />
+              <span>Low-Stock Alerts</span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => onNavigate('stock')}
+              className="text-[11px] font-semibold text-[#141414] dark:text-[#E5C6C3] hover:underline cursor-pointer"
+            >
+              Restock →
+            </button>
+          </div>
+
+          {lowStockItems.length === 0 && outOfStockItems.length === 0 ? (
+            <div className="py-6 text-center text-xs text-[#7D6E65]">
+              All fashion pieces are well stocked.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#EFE8E0] dark:divide-[#2A2622]">
+              {[...outOfStockItems, ...lowStockItems].slice(0, 5).map((item) => (
+                <div key={item.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
+                      {item.name}
+                    </div>
+                    <div className="text-[10px] text-[#7D6E65] font-mono-numbers">
+                      {item.category} · {item.barcode}
+                    </div>
+                  </div>
+                  <span
+                    className={`font-mono-numbers font-bold text-xs shrink-0 ${
+                      item.stockQuantity <= 0
+                        ? 'text-[#9B2C2C] dark:text-[#FCA5A5]'
+                        : 'text-[#9A6B2F] dark:text-[#F1D29B]'
+                    }`}
+                  >
+                    {item.stockQuantity} left
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recent Transactions */}
+        <div className="lg:col-span-2 rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-editorial text-base font-semibold text-[#141414] dark:text-[#F6F1EB]">
+              Recent Boutique Sales
+            </h2>
+            <button
+              type="button"
+              onClick={() => onNavigate('payments')}
+              className="text-[11px] font-semibold text-[#141414] dark:text-[#E5C6C3] hover:underline cursor-pointer"
+            >
+              Sales History →
+            </button>
+          </div>
+
+          {sales.length === 0 ? (
+            <div className="py-8 text-center space-y-2">
+              <div className="text-xs text-[#7D6E65]">
+                No completed bills yet. Open the POS Counter to ring up your first boutique sale.
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('pos')}
+                className="px-4 py-2 rounded-xl bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] text-xs font-semibold cursor-pointer"
+              >
+                Start First Sale
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-[#EFE8E0] dark:border-[#2A2622] text-left text-[10px] uppercase tracking-wider text-[#8A7E75]">
+                    <th className="py-2 pr-3">Invoice</th>
+                    <th className="py-2 pr-3">Client</th>
+                    <th className="py-2 pr-3">Method</th>
+                    <th className="py-2 pr-3 text-right">Amount</th>
+                    <th className="py-2 text-right">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#EFE8E0] dark:divide-[#2A2622]">
+                  {sales.slice(0, 6).map((sale) => (
+                    <tr key={sale.id}>
+                      <td className="py-2.5 pr-3 font-mono-numbers font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                        {sale.invoiceNo}
+                      </td>
+                      <td className="py-2.5 pr-3 text-[#4A433E] dark:text-[#C9BFB6] truncate max-w-[160px]">
+                        {sale.customerName}
+                      </td>
+                      <td className="py-2.5 pr-3 capitalize text-[#7D6E65] dark:text-[#A89E96]">
+                        {sale.paymentMethod.replace('_', ' ')}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                        {storeProfile.currency} {sale.grandTotal.toLocaleString()}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentReceipt(sale)}
+                          className="p-1.5 rounded-lg border border-[#E8E0D8] dark:border-[#2E2A26] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] text-[#141414] dark:text-[#F6F1EB] cursor-pointer"
+                          title="Print Receipt / Digital Invoice"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

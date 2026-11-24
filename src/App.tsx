@@ -21,7 +21,6 @@ import { PriceAdjusterModal } from './components/pricing/PriceAdjusterModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
 import { StockManager } from './components/stock/StockManager';
 import { AuthModal } from './components/auth/AuthModal';
-import { AdminChatBot } from './components/chat/AdminChatBot';
 import { PaymentRecords } from './components/payments/PaymentRecords';
 import { StaffSalary } from './components/salary/StaffSalary';
 import { ExpenseManager } from './components/expenses/ExpenseManager';
@@ -37,9 +36,15 @@ import { ThemeLibrary } from './components/theme/ThemeLibrary';
 import { AuthPage } from './components/auth/AuthPage';
 import { EstimatesManager } from './components/estimates/EstimatesManager';
 import { BranchManagement } from './components/branches/BranchManagement';
-import { Plus, X, Sparkles, Languages, Camera, Upload, Palette, Image as ImageIcon } from 'lucide-react';
+import { ActivityLogsView } from './components/activity/ActivityLogsView';
+import { CategoriesView } from './components/boutique/CategoriesView';
+import { DiscountsPromotionsView } from './components/boutique/DiscountsPromotionsView';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { OfflineIndicator } from './components/common/OfflineIndicator';
+import { X, Sparkles, Languages, Camera, Upload, Palette, Image as ImageIcon } from 'lucide-react';
 import { CameraCaptureModal } from './components/common/CameraCaptureModal';
 import { VERTICALS_CONFIG } from './data/defaultData';
+import { BOUTIQUE_CATEGORIES } from './data/boutiqueCatalog';
 import { autoTranslateToUrdu } from './utils/urduTranslate';
 
 function PosAppContent() {
@@ -49,44 +54,38 @@ function PosAppContent() {
     activeVertical,
     addProduct,
     storeProfile,
-    cart,
     isTabAllowedForRole,
     userSession,
     effectiveRole,
+    setAppliedCouponCode,
   } = usePos();
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  // Default to flagship Fashion Boutique POS Terminal
+  const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
+  const [initialPosCategory, setInitialPosCategory] = useState<string>('All');
 
   const isMasterAdmin = userSession.email.toLowerCase().trim() === 'bashirsonselectric@gmail.com';
   const isUserAdmin = effectiveRole === 'admin' || userSession.role === 'admin' || isMasterAdmin;
 
-  // Enforce Super Admin & RBAC Access: Admin Panel ONLY accessible by bashirsonselectric@gmail.com
-  // Strictly hidden and redirected for all other user accounts
+  // Enforce Super Admin & RBAC Access
   React.useEffect(() => {
     if (activeTab === 'admin' && !isMasterAdmin) {
       setActiveTab('dashboard');
       return;
     }
-    if (!isUserAdmin && activeTab === 'staff_roles') {
+    if (!isUserAdmin && (activeTab === 'staff_roles' || activeTab === 'activity_logs')) {
       setActiveTab('dashboard');
       return;
     }
-    if (!isTabAllowedForRole(activeTab)) {
+    if (activeTab !== 'activity_logs' && !isTabAllowedForRole(activeTab)) {
       setActiveTab('pos');
     }
   }, [activeTab, isTabAllowedForRole, isMasterAdmin, isUserAdmin]);
+
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isCustomItemOpen, setIsCustomItemOpen] = useState(false);
   const [isPriceAdjusterOpen, setIsPriceAdjusterOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  // Direct land new user on sign up / business registration wizard
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => {
-    try {
-      const onboarded = localStorage.getItem('apna_pos_onboarded');
-      return !onboarded;
-    } catch {
-      return false;
-    }
-  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -110,22 +109,26 @@ function PosAppContent() {
     }
   };
 
-  // Quick custom item modal form
+  // Quick custom item modal state (preserving Auto-Urdu, Image Upload/Camera, Garment Size & 7-9 Color Sets)
   const [customName, setCustomName] = useState('');
   const [customUrduName, setCustomUrduName] = useState('');
+  const [customCategory, setCustomCategory] = useState<string>(BOUTIQUE_CATEGORIES[0].id);
+  const [customBrand, setCustomBrand] = useState('Maison Élan');
   const [customPrice, setCustomPrice] = useState<number>(0);
   const [customCost, setCustomCost] = useState<number>(0);
   const [customUnit, setCustomUnit] = useState('pcs');
   const [customImage, setCustomImage] = useState<string>('');
-  const [customSize, setCustomSize] = useState<string>('L');
-  const [customColorVariants, setCustomColorVariants] = useState<{ color: string; hex?: string; stock: number; inStock?: boolean }[]>([
-    { color: 'Navy Blue', hex: '#1e3a8a', stock: 10, inStock: true },
-    { color: 'Jet Black', hex: '#09090b', stock: 8, inStock: true },
-    { color: 'Off White', hex: '#f8fafc', stock: 6, inStock: true },
-    { color: 'Slate Grey', hex: '#64748b', stock: 5, inStock: true },
-    { color: 'Ruby Red', hex: '#dc2626', stock: 4, inStock: true },
-    { color: 'Olive Green', hex: '#3f6212', stock: 3, inStock: true },
-    { color: 'Royal Blue', hex: '#2563eb', stock: 0, inStock: false }, // Out of stock highlight
+  const [customSize, setCustomSize] = useState<string>('M');
+  const [customColorVariants, setCustomColorVariants] = useState<
+    { color: string; hex?: string; stock: number; inStock?: boolean }[]
+  >([
+    { color: 'Ivory Silk', hex: '#F6F0E6', stock: 10, inStock: true },
+    { color: 'Blush Rose', hex: '#E8C5C1', stock: 8, inStock: true },
+    { color: 'Warm Sand', hex: '#D8C7B4', stock: 6, inStock: true },
+    { color: 'Jet Black', hex: '#141414', stock: 5, inStock: true },
+    { color: 'Champagne', hex: '#DFC7A7', stock: 4, inStock: true },
+    { color: 'Olive Sage', hex: '#7D8471', stock: 3, inStock: true },
+    { color: 'Burgundy', hex: '#6E2B3A', stock: 0, inStock: false },
   ]);
   const [isQuickCameraOpen, setIsQuickCameraOpen] = useState(false);
 
@@ -136,24 +139,24 @@ function PosAppContent() {
     addProduct({
       name: customName.trim(),
       urduName: customUrduName.trim() || autoTranslateToUrdu(customName.trim()),
-      barcode: `${Math.floor(896000000000 + Math.random() * 9000000000)}`,
-      category: activeVertical === 'clothing_apparel' ? 'Fabrics & Clothes' : 'Quick Sale Counter',
+      barcode: `FB-${Math.floor(100000 + Math.random() * 900000)}`,
+      category: activeVertical === 'clothing_apparel' ? customCategory : 'Quick Sale Counter',
       vertical: activeVertical,
-      costPrice: customCost || Math.round(customPrice * 0.75),
+      costPrice: customCost || Math.round(customPrice * 0.65),
       retailPrice: customPrice,
-      stockQuantity: 99,
-      minStockAlert: 5,
+      stockQuantity: 25,
+      minStockAlert: 4,
       unit: customUnit,
-      taxPercent: 0,
+      taxPercent: 5,
       image: customImage || undefined,
       size: customSize || undefined,
       color: customColorVariants[0]?.color || undefined,
       options: {
         colors: customColorVariants.map((c) => c.color),
-        sizes: ['S', 'M', 'L', 'XL', 'XXL', '4.5m (Suit)'],
+        sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL', '4.5m (Suit)'],
       },
       colorVariants: customColorVariants,
-      verticalAttributes: {},
+      verticalAttributes: { brand: customBrand.trim() || 'Atelier' },
     });
 
     setCustomName('');
@@ -164,15 +167,12 @@ function PosAppContent() {
     setIsCustomItemOpen(false);
   };
 
-  // Direct land new user or shop owner on Sign up / Login page first
-  // After login, dashboard shows. When anyone logs out, direct land back on Sign up / Login page
   if (!userSession.isAuthenticated) {
     return <AuthPage />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/60 dark:bg-slate-950 flex flex-col text-slate-900 dark:text-slate-100 selection:bg-emerald-500 selection:text-white transition-colors">
-      {/* Header with Google User Profile & Price Adjuster */}
+    <div className="min-h-screen bg-[#FAF7F4] dark:bg-[#11100F] flex flex-col text-[#141414] dark:text-[#F6F1EB] selection:bg-[#141414] selection:text-white dark:selection:bg-[#F3E1DF] dark:selection:text-[#141414] transition-colors">
       <Header
         onOpenAiHub={() => setActiveTab('ai_hub')}
         onOpenQuickSale={() => setActiveTab('pos')}
@@ -184,7 +184,6 @@ function PosAppContent() {
       />
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Side Menu */}
         <Navigation
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -205,111 +204,118 @@ function PosAppContent() {
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
         />
 
-        {/* Main Content Body Container */}
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-          <main className="flex-1 pb-20 md:pb-12">
+          <main className="flex-1 pb-20 md:pb-8">
             {activeTab === 'dashboard' && (
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+              <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <DashboardView onNavigate={(tab) => setActiveTab(tab)} />
               </div>
             )}
 
-        {activeTab === 'pos' && (
-          <PosTerminal
-            onOpenCheckout={() => setIsCheckoutOpen(true)}
-            onOpenCustomItem={() => setIsCustomItemOpen(true)}
-          />
-        )}
+            {activeTab === 'pos' && (
+              <PosTerminal
+                onOpenCheckout={() => setIsCheckoutOpen(true)}
+                onOpenCustomItem={() => setIsCustomItemOpen(true)}
+                initialCategory={initialPosCategory}
+              />
+            )}
 
-        {activeTab === 'estimates' && <EstimatesManager />}
+            {activeTab === 'categories' && (
+              <CategoriesView
+                onSelectCategoryForPos={(catId) => {
+                  setInitialPosCategory(catId);
+                  setActiveTab('pos');
+                }}
+                onAddNewItem={() => setIsCustomItemOpen(true)}
+              />
+            )}
 
-        {activeTab === 'returns' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <ReturnsManager />
-          </div>
-        )}
+            {activeTab === 'promotions' && (
+              <DiscountsPromotionsView
+                onOpenPriceAdjuster={() => setIsPriceAdjusterOpen(true)}
+                onApplyCouponToPos={(code) => {
+                  setAppliedCouponCode(code);
+                  setActiveTab('pos');
+                }}
+              />
+            )}
 
-        {activeTab === 'ai_manager' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <AiManager />
-          </div>
-        )}
+            {activeTab === 'estimates' && <EstimatesManager />}
 
-        {activeTab === 'ai_hub' && <OmniInputHub />}
+            {activeTab === 'returns' && (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <ReturnsManager />
+              </div>
+            )}
 
-        {activeTab === 'inventory' && (
-          <InventoryManager onOpenAiIngest={() => setActiveTab('ai_hub')} />
-        )}
+            {activeTab === 'ai_manager' && (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <AiManager />
+              </div>
+            )}
 
-        {activeTab === 'stock' && (
-          <StockManager onOpenAiIngest={() => setActiveTab('ai_hub')} />
-        )}
+            {activeTab === 'ai_hub' && <OmniInputHub />}
 
-        {activeTab === 'khata' && <UdharKhatta />}
+            {activeTab === 'inventory' && (
+              <InventoryManager onOpenAiIngest={() => setActiveTab('ai_hub')} />
+            )}
 
-        {activeTab === 'person_khatta' && <PersonKhatta />}
+            {activeTab === 'stock' && (
+              <StockManager onOpenAiIngest={() => setActiveTab('ai_hub')} />
+            )}
 
-        {activeTab === 'vip_customers' && <VipCustomers />}
+            {activeTab === 'khata' && <UdharKhatta />}
 
-        {activeTab === 'payments' && <PaymentRecords />}
+            {activeTab === 'person_khatta' && <PersonKhatta />}
 
-        {activeTab === 'expenses' && <ExpenseManager />}
+            {activeTab === 'vip_customers' && <VipCustomers />}
 
-        {activeTab === 'attendance' && <AttendanceTracker />}
+            {activeTab === 'payments' && <PaymentRecords />}
 
-        {activeTab === 'salary' && <StaffSalary />}
+            {activeTab === 'expenses' && <ExpenseManager />}
 
-        {activeTab === 'staff_roles' && <StaffRoleManager />}
+            {activeTab === 'attendance' && <AttendanceTracker />}
 
-        {activeTab === 'suppliers' && (
-          <SupplierLedger onOpenAiScanner={() => setActiveTab('ai_hub')} />
-        )}
+            {activeTab === 'salary' && <StaffSalary />}
 
-        {activeTab === 'analytics' && (
-          <AnalyticsDashboard onOpenAiForecast={() => setActiveTab('ai_hub')} />
-        )}
+            {activeTab === 'staff_roles' && <StaffRoleManager />}
 
-        {activeTab === 'bill_templates' && <BillTemplateLibrary />}
+            {activeTab === 'suppliers' && (
+              <SupplierLedger onOpenAiScanner={() => setActiveTab('ai_hub')} />
+            )}
 
-        {activeTab === 'theme_library' && <ThemeLibrary />}
+            {activeTab === 'analytics' && (
+              <AnalyticsDashboard onOpenAiForecast={() => setActiveTab('ai_hub')} />
+            )}
 
-        {activeTab === 'branches' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <BranchManagement />
-          </div>
-        )}
+            {activeTab === 'activity_logs' && <ActivityLogsView />}
 
-        {activeTab === 'admin' && <AdminPanel />}
+            {activeTab === 'bill_templates' && <BillTemplateLibrary />}
 
-        {activeTab === 'settings' && <StoreSettings />}
-      </main>
+            {activeTab === 'theme_library' && <ThemeLibrary />}
 
-      {/* Footer Branding */}
-      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-3 text-center text-xs text-slate-500 dark:text-slate-400 hidden md:block">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-slate-800">Apna AI POS</span>
-            <span>•</span>
-            <span>Cloud Retail & Udhar Khatta Engine by <strong>Godigly</strong></span>
-          </div>
-          <div className="flex items-center space-x-4 text-[11px] text-slate-400">
-            <span>Dynamic Multi-Vertical Schemas</span>
-            <span>•</span>
-            <span>WhatsApp Direct Ledger</span>
-            <span>•</span>
-            <span>Price Adjuster Engine</span>
-            <span>•</span>
-            <span className="text-emerald-600 font-semibold">Gemini 3.8 Flash</span>
-          </div>
+            {activeTab === 'branches' && (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                <BranchManagement />
+              </div>
+            )}
+
+            {activeTab === 'admin' && isMasterAdmin && <AdminPanel />}
+
+            {activeTab === 'settings' && <StoreSettings />}
+          </main>
+
+          <footer className="bg-white dark:bg-[#161412] border-t border-[#E8E0D8] dark:border-[#2A2622] py-2.5 px-6 text-xs text-[#7D6E65] dark:text-[#A89E96] hidden md:flex items-center justify-between">
+            <span>
+              <strong className="font-editorial text-[#141414] dark:text-[#F6F1EB]">{storeProfile.name}</strong> · Fashion Boutique POS
+            </span>
+            <span className="text-[11px]">Offline-First Retail & Cloud Sync</span>
+          </footer>
         </div>
-      </footer>
-    </div>
-  </div>
+      </div>
 
-      {/* Payment Checkout Modal */}
       {isCheckoutOpen && <PaymentModal onClose={() => setIsCheckoutOpen(false)} />}
 
-      {/* Thermal Receipt Preview & Print Modal */}
       {currentReceipt && (
         <ThermalReceiptModal
           receipt={currentReceipt}
@@ -317,32 +323,33 @@ function PosAppContent() {
         />
       )}
 
-      {/* Price Increase & Decrease Modal */}
       <PriceAdjusterModal
         isOpen={isPriceAdjusterOpen}
         onClose={() => setIsPriceAdjusterOpen(false)}
       />
 
-      {/* User Profile Component Modal (Google Account / Sign Out) */}
       <UserProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
       />
 
-      {/* Quick Add Custom Item Modal */}
+      {/* Quick Add Custom Item Modal (Luxury Boutique Styling + Auto-Urdu + Photo + 7-9 Color Sets) */}
       {isCustomItemOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
+          <div className="bg-white dark:bg-[#1A1816] rounded-2xl max-w-md w-full shadow-2xl border border-[#E8E0D8] dark:border-[#2E2A26] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#EFE8E0] dark:border-[#2A2622] flex items-center justify-between bg-[#FAF7F4] dark:bg-[#161412]">
               <div>
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                <span className="text-[10px] font-semibold text-[#7D6E65] dark:text-[#A89E96] uppercase tracking-[0.18em]">
                   Quick Catalog Entry
                 </span>
-                <h3 className="text-base font-bold">Add Item to {VERTICALS_CONFIG[activeVertical].name}</h3>
+                <h3 className="font-editorial text-lg font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                  Add New Boutique Piece
+                </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsCustomItemOpen(false)}
-                className="p-1 text-slate-400 hover:text-white"
+                className="p-1.5 rounded-lg text-[#7D6E65] hover:text-[#141414] dark:hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -351,11 +358,11 @@ function PosAppContent() {
             <form onSubmit={handleAddCustomItem} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">
                     Item Title (English / Roman) *
                   </label>
-                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
+                  <span className="text-[10px] text-[#7D6E65] dark:text-[#E5C6C3] font-semibold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
                     Auto-Urdu
                   </span>
                 </div>
@@ -368,39 +375,68 @@ function PosAppContent() {
                     setCustomName(val);
                     setCustomUrduName(autoTranslateToUrdu(val));
                   }}
-                  placeholder="e.g. 10A Circuit Breaker, 7/29 Wire, or 500g Tea"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-lg focus:outline-hidden font-bold"
+                  placeholder="e.g. Silk Wrap Dress, Calfskin Tote, or Gold Pendant"
+                  className="w-full px-3 py-2 text-xs border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl focus:outline-none focus:border-[#141414] dark:focus:border-[#E5C6C3] font-medium"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-                    <Languages className="w-3.5 h-3.5 text-purple-500" />
-                    <span>اردو نام (Urdu Name - Auto-Filled)</span>
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] flex items-center gap-1">
+                    <Languages className="w-3.5 h-3.5 text-[#7D6E65]" />
+                    <span>اردو نام (Urdu Name)</span>
                   </label>
                   <button
                     type="button"
                     onClick={() => setCustomUrduName(autoTranslateToUrdu(customName))}
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800 flex items-center gap-1 cursor-pointer"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[#F3E1DF] dark:bg-[#3A2827] text-[#141414] dark:text-[#F6F1EB] cursor-pointer"
                   >
-                    <Sparkles className="w-2.5 h-2.5 text-amber-500" />
-                    <span>Auto-Fill</span>
+                    Auto-Fill
                   </button>
                 </div>
                 <input
                   type="text"
                   value={customUrduName}
                   onChange={(e) => setCustomUrduName(e.target.value)}
-                  placeholder="e.g. 10 ایمپیئر بریکر"
-                  className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 bg-purple-50/50 dark:bg-purple-950/30 text-purple-900 dark:text-purple-200 rounded-lg focus:outline-hidden"
+                  placeholder="e.g. سلک ڈریس"
+                  className="w-full px-3 py-2 text-xs font-semibold border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl focus:outline-none focus:border-[#141414]"
                   dir="rtl"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl"
+                  >
+                    {BOUTIQUE_CATEGORIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1">
+                    Brand / Designer
+                  </label>
+                  <input
+                    type="text"
+                    value={customBrand}
+                    onChange={(e) => setCustomBrand(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1">
                     Retail Price ({storeProfile.currency}) *
                   </label>
                   <input
@@ -408,44 +444,37 @@ function PosAppContent() {
                     required
                     value={customPrice || ''}
                     onChange={(e) => setCustomPrice(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-mono-numbers font-bold text-emerald-700 border border-slate-300 rounded-lg focus:outline-hidden"
+                    className="w-full px-3 py-2 text-xs font-mono-numbers font-bold border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Cost Price (Wholesale)
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1">
+                    Cost Price
                   </label>
                   <input
                     type="number"
                     value={customCost || ''}
                     onChange={(e) => setCustomCost(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs font-mono-numbers border border-slate-300 rounded-lg focus:outline-hidden"
+                    className="w-full px-3 py-2 text-xs font-mono-numbers border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl"
                   />
                 </div>
               </div>
 
-              {/* Visual Image Upload & Capture */}
-              <div className="pt-1">
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                    Product Image / Garment Photo
-                  </label>
-                  <span className="text-[10px] text-purple-600 font-bold">
-                    Upload or Live Camera
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="w-12 h-12 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 overflow-hidden flex items-center justify-center shrink-0">
+              {/* Image Upload & Live Camera */}
+              <div>
+                <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1.5">
+                  Product Photo (Upload or Live Camera)
+                </label>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-12 h-12 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#121110] overflow-hidden flex items-center justify-center shrink-0">
                     {customImage ? (
-                      <img src={customImage} alt="custom" className="w-full h-full object-cover" />
+                      <img src={customImage} alt="Product preview" className="w-full h-full object-cover" />
                     ) : (
-                      <ImageIcon className="w-5 h-5 text-slate-400" />
+                      <ImageIcon className="w-5 h-5 text-[#8A7E75]" />
                     )}
                   </div>
-
                   <div className="flex flex-wrap items-center gap-1.5 flex-1">
-                    <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-300 dark:border-purple-800 text-[11px] font-bold inline-flex items-center gap-1 transition-colors shadow-2xs">
+                    <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-[#F6F1EB] dark:bg-[#24201C] hover:bg-[#EFE8E0] text-[#141414] dark:text-[#F6F1EB] border border-[#E8E0D8] dark:border-[#2E2A26] text-[11px] font-semibold inline-flex items-center gap-1">
                       <Upload className="w-3.5 h-3.5" />
                       <span>Upload</span>
                       <input
@@ -464,21 +493,19 @@ function PosAppContent() {
                         }}
                       />
                     </label>
-
                     <button
                       type="button"
                       onClick={() => setIsQuickCameraOpen(true)}
-                      className="px-3 py-1.5 rounded-lg bg-linear-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white text-[11px] font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:text-[#141414] text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
                     >
-                      <Camera className="w-3.5 h-3.5 text-white" />
-                      <span>Live Camera</span>
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Camera</span>
                     </button>
-
                     {customImage && (
                       <button
                         type="button"
                         onClick={() => setCustomImage('')}
-                        className="text-[10px] text-rose-500 hover:underline px-1 font-semibold"
+                        className="text-[11px] text-[#9B2C2C] hover:underline px-1 font-semibold cursor-pointer"
                       >
                         Remove
                       </button>
@@ -490,21 +517,21 @@ function PosAppContent() {
               {/* Garment Size Selection */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                    Garment Size / Cut
+                  <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                    Size / Cut Length
                   </label>
-                  <span className="text-[10px] text-purple-600 font-bold">{customSize}</span>
+                  <span className="text-[11px] text-[#7D6E65] dark:text-[#E5C6C3] font-semibold">{customSize}</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {['S', 'M', 'L', 'XL', 'XXL', '4.5m (Suit)', '7.0m (Double)'].map((sz) => (
+                  {['XS', 'S', 'M', 'L', 'XL', 'XXL', '4.5m (Suit)', 'One Size'].map((sz) => (
                     <button
                       key={sz}
                       type="button"
                       onClick={() => setCustomSize(sz)}
-                      className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer ${
+                      className={`text-[10px] px-2.5 py-1 rounded-lg border font-semibold transition-colors cursor-pointer ${
                         customSize === sz
-                          ? 'bg-purple-600 text-white border-purple-600'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                          ? 'bg-[#141414] text-white border-[#141414] dark:bg-[#F6F1EB] dark:text-[#141414]'
+                          : 'bg-[#FAF7F4] dark:bg-[#221F1C] text-[#4A433E] dark:text-[#C9BFB6] border-[#E8E0D8] dark:border-[#2E2A26]'
                       }`}
                     >
                       {sz}
@@ -513,54 +540,54 @@ function PosAppContent() {
                 </div>
               </div>
 
-              {/* 1-Set Clothes Color Bundle Preview & Out of Stock Highlights */}
-              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5">
+              {/* 1-Set Clothes Color Bundle */}
+              <div className="p-3 rounded-xl bg-[#FAF7F4] dark:bg-[#141210] border border-[#E8E0D8] dark:border-[#2A2622] space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                    <Palette className="w-3.5 h-3.5 text-purple-600" />
-                    <span>1 Set (7-9 Colors)</span>
+                  <span className="font-semibold text-[#141414] dark:text-[#F6F1EB] flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-[#7D6E65]" />
+                    <span>Color Swatches (Click to toggle stock)</span>
                   </span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={() =>
                         setCustomColorVariants([
-                          { color: 'Navy Blue', hex: '#1e3a8a', stock: 10, inStock: true },
-                          { color: 'Jet Black', hex: '#09090b', stock: 8, inStock: true },
-                          { color: 'Off White', hex: '#f8fafc', stock: 6, inStock: true },
-                          { color: 'Slate Grey', hex: '#64748b', stock: 5, inStock: true },
-                          { color: 'Camel Brown', hex: '#b45309', stock: 4, inStock: true },
-                          { color: 'Olive Green', hex: '#3f6212', stock: 3, inStock: true },
-                          { color: 'Maroon', hex: '#881337', stock: 0, inStock: false }, // Out of stock
-                        ]);
-                      }}
-                      className="px-1.5 py-0.5 text-[9px] font-bold bg-purple-100 text-purple-700 rounded"
+                          { color: 'Ivory Silk', hex: '#F6F0E6', stock: 10, inStock: true },
+                          { color: 'Blush Rose', hex: '#E8C5C1', stock: 8, inStock: true },
+                          { color: 'Warm Sand', hex: '#D8C7B4', stock: 6, inStock: true },
+                          { color: 'Jet Black', hex: '#141414', stock: 5, inStock: true },
+                          { color: 'Camel', hex: '#B89572', stock: 4, inStock: true },
+                          { color: 'Sage', hex: '#8F9A86', stock: 3, inStock: true },
+                          { color: 'Maroon', hex: '#7A2036', stock: 0, inStock: false },
+                        ])
+                      }
+                      className="px-1.5 py-0.5 text-[10px] font-semibold bg-[#F3E1DF] dark:bg-[#3A2827] text-[#141414] dark:text-[#F6F1EB] rounded cursor-pointer"
                     >
                       7-Set
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={() =>
                         setCustomColorVariants([
-                          { color: 'Navy Blue', hex: '#1e3a8a', stock: 12, inStock: true },
-                          { color: 'Jet Black', hex: '#09090b', stock: 10, inStock: true },
-                          { color: 'Crisp White', hex: '#f8fafc', stock: 8, inStock: true },
-                          { color: 'Royal Blue', hex: '#2563eb', stock: 6, inStock: true },
-                          { color: 'Emerald Green', hex: '#16a34a', stock: 4, inStock: true },
-                          { color: 'Ruby Red', hex: '#dc2626', stock: 3, inStock: true },
-                          { color: 'Heather Grey', hex: '#94a3b8', stock: 0, inStock: false },
-                          { color: 'Mustard Yellow', hex: '#ca8a04', stock: 0, inStock: false },
-                          { color: 'Burgundy', hex: '#701a75', stock: 0, inStock: false },
-                        ]);
-                      }}
-                      className="px-1.5 py-0.5 text-[9px] font-bold bg-fuchsia-100 text-fuchsia-700 rounded"
+                          { color: 'Ivory Silk', hex: '#F6F0E6', stock: 12, inStock: true },
+                          { color: 'Jet Black', hex: '#141414', stock: 10, inStock: true },
+                          { color: 'Blush Rose', hex: '#E8C5C1', stock: 8, inStock: true },
+                          { color: 'Midnight Navy', hex: '#1B253A', stock: 6, inStock: true },
+                          { color: 'Emerald', hex: '#1E5A43', stock: 4, inStock: true },
+                          { color: 'Ruby', hex: '#9E2A3B', stock: 3, inStock: true },
+                          { color: 'Stone Grey', hex: '#9B9690', stock: 0, inStock: false },
+                          { color: 'Gold Ochre', hex: '#C69C4D', stock: 0, inStock: false },
+                          { color: 'Plum', hex: '#5D2A42', stock: 0, inStock: false },
+                        ])
+                      }
+                      className="px-1.5 py-0.5 text-[10px] font-semibold bg-[#EFE8E0] dark:bg-[#2A2622] text-[#141414] dark:text-[#F6F1EB] rounded cursor-pointer"
                     >
                       9-Set
                     </button>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {customColorVariants.map((cv, idx) => (
                     <button
                       key={idx}
@@ -571,27 +598,31 @@ function PosAppContent() {
                         updated[idx] = { ...updated[idx], inStock: nextInStock, stock: nextInStock ? 5 : 0 };
                         setCustomColorVariants(updated);
                       }}
-                      className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold border inline-flex items-center gap-1 cursor-pointer transition-all ${
+                      className={`text-[10px] px-2 py-0.5 rounded-md font-semibold border inline-flex items-center gap-1 cursor-pointer ${
                         cv.inStock === false
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 line-through'
-                          : 'bg-white text-slate-700 border-slate-200'
+                          ? 'bg-[#F3E1DF]/60 dark:bg-[#3A2121] text-[#9B2C2C] dark:text-[#FCA5A5] border-[#E5C6C3] dark:border-[#6B3333] line-through'
+                          : 'bg-white dark:bg-[#1F1C19] text-[#141414] dark:text-[#F6F1EB] border-[#E8E0D8] dark:border-[#2E2A26]'
                       }`}
-                      title="Click to toggle In Stock / Out of Stock"
                     >
-                      <span className="w-2 h-2 rounded-full border border-black/20" style={{ backgroundColor: cv.hex || '#64748b' }} />
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-black/15"
+                        style={{ backgroundColor: cv.hex || '#64748b' }}
+                      />
                       <span>{cv.color}</span>
-                      {cv.inStock === false && <span className="text-[8px] bg-rose-600 text-white px-1 rounded no-underline">0</span>}
+                      {cv.inStock === false && (
+                        <span className="text-[9px] font-bold no-underline">Out</span>
+                      )}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Unit</label>
+                <label className="block text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] mb-1">Unit</label>
                 <select
                   value={customUnit}
                   onChange={(e) => setCustomUnit(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden"
+                  className="w-full px-3 py-2 text-xs border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110] text-[#141414] dark:text-[#F6F1EB] rounded-xl"
                 >
                   {VERTICALS_CONFIG[activeVertical].unitOptions.map((u) => (
                     <option key={u} value={u}>
@@ -601,19 +632,19 @@ function PosAppContent() {
                 </select>
               </div>
 
-              <div className="pt-3 border-t border-slate-200 flex justify-end space-x-2">
+              <div className="pt-3 border-t border-[#EFE8E0] dark:border-[#2A2622] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsCustomItemOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  className="px-4 py-2 rounded-xl border border-[#E8E0D8] dark:border-[#2E2A26] text-xs font-semibold text-[#4A433E] dark:text-[#C9BFB6] hover:bg-[#FAF7F4] dark:hover:bg-[#24201C] cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-700/20"
+                  className="px-5 py-2 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:text-[#141414] text-white text-xs font-semibold cursor-pointer"
                 >
-                  Add & Ready to Bill
+                  Save to Boutique Catalog
                 </button>
               </div>
             </form>
@@ -621,30 +652,29 @@ function PosAppContent() {
         </div>
       )}
 
-      {/* Quick Item Camera Capture Modal */}
       <CameraCaptureModal
         isOpen={isQuickCameraOpen}
         onClose={() => setIsQuickCameraOpen(false)}
-        title="Capture Custom Product Photo"
+        title="Capture Product Photo"
         onCapture={(base64) => setCustomImage(base64)}
       />
 
-      {/* Floating Interactive Chat Bot (User to Master Admin) */}
-      <AdminChatBot />
-
-      {/* Sign In & Sign Up / Business Onboarding Popup */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
+
+      <OfflineIndicator />
     </div>
   );
 }
 
 export default function App() {
   return (
-    <PosProvider>
-      <PosAppContent />
-    </PosProvider>
+    <ErrorBoundary>
+      <PosProvider>
+        <PosAppContent />
+      </PosProvider>
+    </ErrorBoundary>
   );
 }
