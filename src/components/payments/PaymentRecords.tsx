@@ -20,6 +20,11 @@ import {
   Receipt,
   FileSpreadsheet,
   MessageCircle,
+  Cloud,
+  Clock,
+  RefreshCw,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 export const PaymentRecords: React.FC = () => {
@@ -30,7 +35,17 @@ export const PaymentRecords: React.FC = () => {
     storeProfile,
     sales,
     setCurrentReceipt,
+    isOffline,
+    setIsOffline,
+    isSyncing,
+    offlineSalesQueue,
+    syncOfflineSales,
+    lastSyncTime,
   } = usePos();
+
+  const pendingOfflineSales = sales.filter((s) => s.isOfflineSyncPending);
+  const syncedOfflineSales = sales.filter((s) => s.isOfflineSale && !s.isOfflineSyncPending);
+  const totalPendingOffline = Math.max(pendingOfflineSales.length, offlineSalesQueue.length);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
@@ -201,6 +216,70 @@ export const PaymentRecords: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Offline-to-Online Sales Sync Banner */}
+      {(isOffline || totalPendingOffline > 0 || syncedOfflineSales.length > 0) && (
+        <div className="rounded-2xl border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#1A1816] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                isOffline || totalPendingOffline > 0
+                  ? 'bg-[#FBF5EC] dark:bg-[#2B2216] text-[#9A6B2F] dark:text-[#F1D29B]'
+                  : 'bg-emerald-500/10 text-[#2F6B4F] dark:text-[#6EE7B7]'
+              }`}
+            >
+              {isOffline ? (
+                <WifiOff className="w-4 h-4" />
+              ) : isSyncing ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : totalPendingOffline > 0 ? (
+                <Clock className="w-4 h-4" />
+              ) : (
+                <Cloud className="w-4 h-4" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-[#141414] dark:text-[#F6F1EB]">
+                {isOffline
+                  ? `Offline Mode Active · ${totalPendingOffline} Sale${totalPendingOffline === 1 ? '' : 's'} Queued Locally`
+                  : totalPendingOffline > 0
+                  ? `${totalPendingOffline} Offline Sale${totalPendingOffline === 1 ? '' : 's'} Ready to Update Online`
+                  : `${syncedOfflineSales.length} Offline Sale${syncedOfflineSales.length === 1 ? '' : 's'} Updated Online`}
+              </div>
+              <div className="text-[11px] text-[#7D6E65] dark:text-[#A89E96]">
+                {isOffline
+                  ? 'All counter bills are cached in IndexedDB and will update online automatically when reconnected.'
+                  : lastSyncTime
+                  ? `Last online reconciliation at ${lastSyncTime}`
+                  : 'Automatic background synchronization active.'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {isOffline ? (
+              <button
+                type="button"
+                onClick={() => setIsOffline(false)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] text-white dark:text-[#141414] text-xs font-semibold cursor-pointer"
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Go Online &amp; Update</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isSyncing}
+                onClick={() => void syncOfflineSales()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] text-white dark:text-[#141414] text-xs font-semibold disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Updating Online...' : 'Update Online Now'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
@@ -385,6 +464,33 @@ export const PaymentRecords: React.FC = () => {
                       {record.notes && (
                         <div className="text-[10px] text-slate-400 truncate max-w-xs">{record.notes}</div>
                       )}
+                      {(() => {
+                        if (!record.referenceNo) return null;
+                        const linkedSale = sales.find((s) => s.invoiceNo === record.referenceNo);
+                        if (!linkedSale) return null;
+                        if (linkedSale.isOfflineSyncPending) {
+                          return (
+                            <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#9A6B2F] dark:text-[#F1D29B]">
+                              <Clock className="w-3 h-3" />
+                              <span>Offline · Pending Online Update</span>
+                            </div>
+                          );
+                        }
+                        if (linkedSale.isOfflineSale) {
+                          return (
+                            <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#2F6B4F] dark:text-[#6EE7B7]">
+                              <Cloud className="w-3 h-3" />
+                              <span>
+                                Updated Online
+                                {linkedSale.syncedAt
+                                  ? ` · ${new Date(linkedSale.syncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                  : ''}
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </td>
 
                     <td className="p-3.5">{getMethodBadge(record.method)}</td>

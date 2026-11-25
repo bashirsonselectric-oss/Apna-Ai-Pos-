@@ -4,6 +4,7 @@ import { PWAInstallButton } from './common/PWAInstallButton';
 import {
   Menu,
   RefreshCw,
+  Wifi,
   WifiOff,
   Cloud,
   CloudOff,
@@ -58,15 +59,20 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [storeMenuOpen, setStoreMenuOpen] = useState(false);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
 
   const storeMenuRef = useRef<HTMLDivElement>(null);
+  const syncMenuRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       if (storeMenuRef.current && !storeMenuRef.current.contains(e.target as Node)) {
         setStoreMenuOpen(false);
+      }
+      if (syncMenuRef.current && !syncMenuRef.current.contains(e.target as Node)) {
+        setSyncMenuOpen(false);
       }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setNotifOpen(false);
@@ -79,7 +85,15 @@ export const Header: React.FC<HeaderProps> = ({
   const handleManualSync = async () => {
     const res = await syncOfflineSales();
     setSyncFeedback(res.message || (res.success ? 'Synced' : 'Offline'));
-    setTimeout(() => setSyncFeedback(null), 3000);
+    setTimeout(() => setSyncFeedback(null), 3500);
+  };
+
+  const handleToggleOfflineMode = () => {
+    const nextOffline = !isOffline;
+    setIsOffline(nextOffline);
+    setSyncFeedback(nextOffline ? 'Offline Mode On' : 'Reconnecting & Updating...');
+    setTimeout(() => setSyncFeedback(null), 3500);
+    setSyncMenuOpen(false);
   };
 
   const userEmail = (userSession.email || '').toLowerCase().trim();
@@ -199,31 +213,30 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Right: Sync, PWA, Theme Toggle, New Sale CTA, Alerts, Profile */}
+          {/* Right: Sync & Connectivity Popover, PWA, Theme Toggle, New Sale CTA, Alerts, Profile */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {isOffline ? (
+            <div className="relative" ref={syncMenuRef}>
               <button
                 type="button"
-                onClick={() => setIsOffline(false)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-[#D4B483] dark:border-[#6B5434] bg-[#FBF5EC] dark:bg-[#2B2216] text-[#7A541F] dark:text-[#F1D29B] text-xs font-semibold cursor-pointer whitespace-nowrap"
-                title="Offline Mode active. Click to check connection."
-              >
-                <WifiOff className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Offline</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleManualSync}
-                disabled={isSyncing}
+                onClick={() => setSyncMenuOpen((p) => !p)}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                  totalPending > 0
+                  isOffline
+                    ? 'border-[#D4B483] dark:border-[#6B5434] bg-[#FBF5EC] dark:bg-[#2B2216] text-[#7A541F] dark:text-[#F1D29B]'
+                    : totalPending > 0
                     ? 'border-[#D4B483] dark:border-[#6B5434] bg-[#FBF5EC] dark:bg-[#2B2216] text-[#7A541F] dark:text-[#F1D29B]'
                     : 'border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#1F1C19] text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#FAF7F4] dark:hover:bg-[#282420]'
                 }`}
-                title={lastSyncTime ? `Last synced at ${lastSyncTime}` : 'Sync offline queue with cloud'}
+                title={
+                  isOffline
+                    ? 'Offline Mode active — click to go online and update sales'
+                    : lastSyncTime
+                    ? `Online · Last synced at ${lastSyncTime}`
+                    : 'Online & Sync controls'
+                }
               >
-                {isSyncing ? (
+                {isOffline ? (
+                  <WifiOff className="w-3.5 h-3.5 text-[#9A6B2F] dark:text-[#F1D29B]" />
+                ) : isSyncing ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#141414] dark:text-[#F3E1DF]" />
                 ) : totalPending > 0 ? (
                   <CloudOff className="w-3.5 h-3.5 text-[#9A6B2F]" />
@@ -231,10 +244,81 @@ export const Header: React.FC<HeaderProps> = ({
                   <Cloud className="w-3.5 h-3.5 text-[#2F6B4F] dark:text-[#6EE7B7]" />
                 )}
                 <span className="hidden md:inline">
-                  {syncFeedback || (isSyncing ? 'Syncing...' : totalPending > 0 ? `Sync (${totalPending})` : 'Synced')}
+                  {syncFeedback ||
+                    (isOffline
+                      ? totalPending > 0
+                        ? `Offline (${totalPending})`
+                        : 'Offline'
+                      : isSyncing
+                      ? 'Updating...'
+                      : totalPending > 0
+                      ? `Sync (${totalPending})`
+                      : 'Online')}
                 </span>
+                <ChevronDown className="w-3 h-3 opacity-60" />
               </button>
-            )}
+
+              {syncMenuOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] shadow-xl p-3.5 z-50 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] flex items-center gap-1.5">
+                        {isOffline ? (
+                          <WifiOff className="w-3.5 h-3.5 text-[#9A6B2F]" />
+                        ) : (
+                          <Wifi className="w-3.5 h-3.5 text-[#2F6B4F] dark:text-[#6EE7B7]" />
+                        )}
+                        <span>{isOffline ? 'Offline Mode Active' : 'Connected Online'}</span>
+                      </div>
+                      <p className="text-[11px] text-[#7D6E65] dark:text-[#A89E96] mt-0.5">
+                        {isOffline
+                          ? 'Sales are cached in IndexedDB and auto-update when back online.'
+                          : lastSyncTime
+                          ? `Last online update at ${lastSyncTime}`
+                          : 'Offline sales sync automatically on reconnect.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-[#FAF7F4] dark:bg-[#221F1C] border border-[#EFE8E0] dark:border-[#2E2A26] px-3 py-2 flex items-center justify-between text-xs">
+                    <span className="text-[#6B625C] dark:text-[#A89E96]">Pending Offline Sales</span>
+                    <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                      {totalPending}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleToggleOfflineMode}
+                      className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                        isOffline
+                          ? 'bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414]'
+                          : 'border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] hover:bg-[#F6F1EB] dark:bg-[#221F1C] dark:hover:bg-[#2A2622] text-[#141414] dark:text-[#F6F1EB]'
+                      }`}
+                    >
+                      {isOffline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+                      <span>{isOffline ? 'Go Online & Update Sales' : 'Switch to Offline Mode'}</span>
+                    </button>
+
+                    {!isOffline && (
+                      <button
+                        type="button"
+                        disabled={isSyncing}
+                        onClick={() => {
+                          void handleManualSync();
+                          setSyncMenuOpen(false);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-[#F3E1DF] hover:bg-[#EAD2CF] dark:bg-[#3A2827] dark:hover:bg-[#493230] text-[#141414] dark:text-[#F6F1EB] text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                        <span>{isSyncing ? 'Updating Online...' : 'Sync Pending Sales Now'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <PWAInstallButton />
 

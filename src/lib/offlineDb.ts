@@ -39,6 +39,7 @@ export interface OfflineSaleRecord {
   createdAt: string;
   updatedAt: string;
   syncedAt?: string;
+  syncTarget?: 'firestore' | 'server';
 }
 
 export interface OfflineSyncItem {

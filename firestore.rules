@@ -255,7 +255,7 @@ service cloud.firestore {
     // STORES & MULTI-TENANT SUBCOLLECTIONS
     // =========================================================================
     match /stores/{storeId} {
-      allow get: if isSignedIn() && isValidId(storeId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(storeId) && (resource == null || existing().ownerId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && isVerified() && isValidId(storeId) &&
         isValidStore(incoming()) &&
@@ -277,7 +277,7 @@ service cloud.firestore {
 
       // Products Subcollection
       match /products/{productId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(productId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(productId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(productId) &&
           isValidProduct(incoming()) &&
@@ -304,7 +304,7 @@ service cloud.firestore {
 
       // Sales Subcollection (With Terminal State Locking)
       match /sales/{saleId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(saleId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(saleId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(saleId) &&
           isValidSale(incoming()) &&
@@ -334,7 +334,7 @@ service cloud.firestore {
 
       // Customers & Udhar Khatta Subcollection
       match /customers/{customerId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(customerId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(customerId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(customerId) &&
           isValidCustomerKhata(incoming()) &&
@@ -361,7 +361,7 @@ service cloud.firestore {
 
       // Suppliers Subcollection
       match /suppliers/{supplierId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(supplierId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(supplierId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(supplierId) &&
           isValidSupplier(incoming()) &&
@@ -388,7 +388,7 @@ service cloud.firestore {
 
       // Expenses Subcollection
       match /expenses/{expenseId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(expenseId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(expenseId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(expenseId) &&
           isValidExpense(incoming()) &&
@@ -403,7 +403,7 @@ service cloud.firestore {
 
       // Returns Subcollection
       match /returns/{returnId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(returnId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(returnId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(returnId) &&
           isValidReturnRecord(incoming()) &&
@@ -417,7 +417,7 @@ service cloud.firestore {
 
       // Staff Roles Subcollection
       match /staff/{staffId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(staffId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(staffId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(staffId) &&
           isValidStaffMember(incoming()) &&
@@ -444,7 +444,7 @@ service cloud.firestore {
 
       // Activity Logs Subcollection (Append-Only Audit Trail)
       match /activityLogs/{logId} {
-        allow get: if isSignedIn() && isValidId(storeId) && isValidId(logId) && (existing().ownerId == request.auth.uid || isAdmin()) && (isStoreOwner(storeId) || isAdmin());
+        allow get: if isSignedIn() && isValidId(storeId) && isValidId(logId) && ((isStoreOwner(storeId) && (resource == null || existing().ownerId == request.auth.uid)) || isAdmin());
         allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() && isVerified() && isValidId(storeId) && isValidId(logId) &&
           isValidActivityLog(incoming()) &&

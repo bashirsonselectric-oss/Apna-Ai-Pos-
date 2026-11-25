@@ -13,6 +13,9 @@ import {
   BarChart3,
   Award,
   Tag,
+  Cloud,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { usePos } from '../../context/PosContext';
 
@@ -37,6 +40,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     storeProfile,
     setCurrentReceipt,
     userSession,
+    isOffline,
+    isSyncing,
+    offlineSalesQueue,
+    syncOfflineSales,
   } = usePos();
 
   const [dateFilter, setDateFilter] = useState<DateFilter>('today');
@@ -436,17 +443,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
 
         {/* Recent Transactions */}
         <div className="lg:col-span-2 rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] p-5 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-editorial text-base font-semibold text-[#141414] dark:text-[#F6F1EB]">
               Recent Boutique Sales
             </h2>
-            <button
-              type="button"
-              onClick={() => onNavigate('payments')}
-              className="text-[11px] font-semibold text-[#141414] dark:text-[#E5C6C3] hover:underline cursor-pointer"
-            >
-              Sales History →
-            </button>
+            <div className="flex items-center gap-3">
+              {offlineSalesQueue.length > 0 && !isOffline && (
+                <button
+                  type="button"
+                  disabled={isSyncing}
+                  onClick={() => void syncOfflineSales()}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#141414] dark:bg-[#F6F1EB] text-white dark:text-[#141414] text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isSyncing
+                      ? 'Updating...'
+                      : `Update ${offlineSalesQueue.length} Offline Sale${offlineSalesQueue.length === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onNavigate('payments')}
+                className="text-[11px] font-semibold text-[#141414] dark:text-[#E5C6C3] hover:underline cursor-pointer"
+              >
+                Sales History →
+              </button>
+            </div>
           </div>
 
           {sales.length === 0 ? (
@@ -470,6 +494,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                     <th className="py-2 pr-3">Invoice</th>
                     <th className="py-2 pr-3">Client</th>
                     <th className="py-2 pr-3">Method</th>
+                    <th className="py-2 pr-3">Sync</th>
                     <th className="py-2 pr-3 text-right">Amount</th>
                     <th className="py-2 text-right">Receipt</th>
                   </tr>
@@ -480,11 +505,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                       <td className="py-2.5 pr-3 font-mono-numbers font-semibold text-[#141414] dark:text-[#F6F1EB]">
                         {sale.invoiceNo}
                       </td>
-                      <td className="py-2.5 pr-3 text-[#4A433E] dark:text-[#C9BFB6] truncate max-w-[160px]">
+                      <td className="py-2.5 pr-3 text-[#4A433E] dark:text-[#C9BFB6] truncate max-w-[140px]">
                         {sale.customerName}
                       </td>
                       <td className="py-2.5 pr-3 capitalize text-[#7D6E65] dark:text-[#A89E96]">
                         {sale.paymentMethod.replace('_', ' ')}
+                      </td>
+                      <td className="py-2.5 pr-3 whitespace-nowrap">
+                        {sale.isOfflineSyncPending ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9A6B2F] dark:text-[#F1D29B]">
+                            <Clock className="w-3 h-3" />
+                            <span>Pending Offline</span>
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2F6B4F] dark:text-[#6EE7B7]"
+                            title={sale.syncedAt ? `Updated online at ${new Date(sale.syncedAt).toLocaleTimeString()}` : 'Synced online'}
+                          >
+                            <Cloud className="w-3 h-3" />
+                            <span>{sale.isOfflineSale ? 'Updated Online' : 'Synced'}</span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-2.5 pr-3 text-right font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
                         {storeProfile.currency} {sale.grandTotal.toLocaleString()}

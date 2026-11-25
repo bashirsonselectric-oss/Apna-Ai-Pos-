@@ -152,7 +152,7 @@ class BackgroundSyncService {
   private handleVisibilityChange = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
       void this.refreshSnapshot().then(() => {
-        if (this.canSyncToCloud() && this.snapshot.totalPendingCount > 0) {
+        if (this.canSyncOnline() && this.snapshot.totalPendingCount > 0) {
           void this.syncNow('visibility_restore');
         }
       });
@@ -205,13 +205,13 @@ class BackgroundSyncService {
 
     // Periodic safety-net sweep while online and queue is non-empty
     this.sweepInterval = setInterval(() => {
-      if (this.canSyncToCloud() && this.snapshot.totalPendingCount > 0 && !this.isProcessing) {
+      if (this.canSyncOnline() && this.snapshot.totalPendingCount > 0 && !this.isProcessing) {
         void this.syncNow('periodic_sweep');
       }
     }, SWEEP_INTERVAL_MS);
 
     void this.refreshSnapshot().then(() => {
-      if (this.canSyncToCloud() && this.snapshot.totalPendingCount > 0) {
+      if (this.canSyncOnline() && this.snapshot.totalPendingCount > 0) {
         void this.syncNow('startup');
       }
     });
@@ -308,10 +308,15 @@ class BackgroundSyncService {
     }
   }
 
-  private canSyncToCloud(): boolean {
+  private canSyncOnline(): boolean {
     if (typeof navigator === 'undefined') return false;
+    return Boolean(navigator.onLine && !this.isManualOffline);
+  }
+
+  private canSyncToCloud(): boolean {
+    if (!this.canSyncOnline()) return false;
     const user = auth.currentUser;
-    return Boolean(navigator.onLine && !this.isManualOffline && user && user.uid && user.emailVerified);
+    return Boolean(user && user.uid && user.emailVerified);
   }
 
   private getCurrentOwnerId(): string | undefined {
@@ -375,14 +380,40 @@ class BackgroundSyncService {
     void this.registerNativeBackgroundSync();
 
     // 3. If offline or manual offline mode, leave queued in IndexedDB for automatic push later
-    if (forceOfflineCache || !this.canSyncToCloud()) {
+    if (forceOfflineCache || !this.canSyncOnline()) {
       return { cached: true, syncedImmediately: false, recordId: saleId };
     }
 
-    // 4. Online & verified: trigger immediate background push
+    // 4. Online: trigger immediate background push (Firestore if verified, otherwise persistent Server Ledger)
     const res = await this.syncNow('immediate_sale');
     const syncedImmediately = res.syncedSaleIds.includes(sale.id) || res.syncedSaleIds.includes(saleId);
     return { cached: true, syncedImmediately, recordId: saleId };
+  }
+
+  /**
+   * Update a cached offline sale record before or during online sync.
+   */
+  public async updateCachedSale(sale: SaleRecord): Promise<void> {
+    const saleId = sanitizeFirestoreId(sale.id);
+    const existing = await offlineDb.getOfflineSale(saleId);
+    if (!existing) return;
+
+    await offlineDb.updateOfflineSale(saleId, {
+      sale,
+      customerName: String(sale.customerName || existing.customerName).slice(0, 160),
+      grandTotal: Math.max(0, Number(sale.grandTotal) || 0),
+      paymentMethod: normalizePaymentMethod(sale.paymentMethod),
+      status: 'pending',
+      retryCount: 0,
+      nextRetryAt: undefined,
+      lastError: undefined,
+    });
+    this.broadcast({ type: 'QUEUE_UPDATED' });
+    await this.refreshSnapshot();
+
+    if (this.canSyncOnline()) {
+      void this.syncNow('sale_updated');
+    }
   }
 
   /**
@@ -511,97 +542,187 @@ class BackgroundSyncService {
     }
 
     const user = auth.currentUser;
-    if (!user || !user.uid || !user.emailVerified) {
-      await this.refreshSnapshot();
-      return { syncedSales: 0, syncedOther: 0, failed: 0, syncedSaleIds: [], skippedReason: 'unauthenticated' };
-    }
+    const useFirestore = Boolean(user && user.uid && user.emailVerified);
 
     this.isProcessing = true;
     this.clearRetryTimer();
     this.lastError = null;
     await this.refreshSnapshot('syncing');
 
-    const ownerId = sanitizeFirestoreId(user.uid);
+    const ownerId: string | undefined = useFirestore && user ? sanitizeFirestoreId(user.uid) : undefined;
     let syncedSales = 0;
+    let syncedOther = 0;
     let failed = 0;
     const syncedSaleIds: string[] = [];
     let earliestNextRetry: number | null = null;
 
     try {
-      const pendingSales = await offlineDb.getPendingOfflineSales(ownerId);
+      const pendingSales: OfflineSaleRecord[] = await offlineDb.getPendingOfflineSales(ownerId);
       const now = Date.now();
 
-      for (const record of pendingSales) {
-        if (!navigator.onLine || this.isManualOffline) break;
+      if (useFirestore && ownerId && user) {
+        const verifiedOwnerId: string = ownerId;
+        for (const record of pendingSales) {
+          if (!navigator.onLine || this.isManualOffline) break;
 
-        // Skip records waiting on backoff unless explicitly triggered manually
-        if (_reason !== 'manual' && record.nextRetryAt && record.nextRetryAt > now) {
-          earliestNextRetry =
-            earliestNextRetry === null ? record.nextRetryAt : Math.min(earliestNextRetry, record.nextRetryAt);
-          continue;
-        }
+          // Skip records waiting on backoff unless explicitly triggered manually
+          if (_reason !== 'manual' && record.nextRetryAt && record.nextRetryAt > now) {
+            earliestNextRetry =
+              earliestNextRetry === null ? record.nextRetryAt : Math.min(earliestNextRetry, record.nextRetryAt);
+            continue;
+          }
 
-        // Claim unclaimed offline sales created before Firebase auth hydrated
-        const claimedOwnerId = record.ownerId === 'unclaimed' ? ownerId : record.ownerId;
-        if (claimedOwnerId !== ownerId) continue;
+          // Claim unclaimed offline sales created before Firebase auth hydrated
+          const claimedOwnerId: string = record.ownerId === 'unclaimed' ? verifiedOwnerId : record.ownerId;
+          if (claimedOwnerId !== verifiedOwnerId) continue;
 
-        await offlineDb.updateOfflineSale(record.id, {
-          ownerId,
-          ownerEmail: user.email || record.ownerEmail,
-          status: 'syncing',
-          lastError: undefined,
-        });
-        await this.refreshSnapshot('syncing');
-
-        try {
-          const syncedAt = await this.pushSaleRecordToFirestore(record, ownerId);
           await offlineDb.updateOfflineSale(record.id, {
             ownerId,
-            status: 'synced',
-            syncedAt,
-            nextRetryAt: undefined,
+            ownerEmail: user.email || record.ownerEmail,
+            status: 'syncing',
             lastError: undefined,
           });
-          syncedSales++;
-          this.syncedThisSession++;
-          syncedSaleIds.push(record.sale.id);
-          if (record.id !== record.sale.id) {
-            syncedSaleIds.push(record.id);
+          await this.refreshSnapshot('syncing');
+
+          try {
+            const syncedAt = await this.pushSaleRecordToFirestore(record, ownerId);
+            await offlineDb.updateOfflineSale(record.id, {
+              ownerId,
+              status: 'synced',
+              syncTarget: 'firestore',
+              syncedAt,
+              nextRetryAt: undefined,
+              lastError: undefined,
+            });
+            syncedSales++;
+            this.syncedThisSession++;
+            syncedSaleIds.push(record.sale.id);
+            if (record.id !== record.sale.id) {
+              syncedSaleIds.push(record.id);
+            }
+            this.notifySaleSynced(record.sale.id, syncedAt, true);
+          } catch (err: any) {
+            failed++;
+            const nextRetryCount = (record.retryCount || 0) + 1;
+            const backoffMs = computeBackoffMs(nextRetryCount);
+            const nextRetryAt = Date.now() + backoffMs;
+            const errorMsg = err?.message || 'Failed to push sale to Firestore';
+            this.lastError = errorMsg;
+
+            await offlineDb.updateOfflineSale(record.id, {
+              status: 'failed',
+              retryCount: nextRetryCount,
+              nextRetryAt: nextRetryCount <= record.maxRetries ? nextRetryAt : undefined,
+              lastError: errorMsg.slice(0, 240),
+            });
+
+            if (nextRetryCount <= record.maxRetries) {
+              earliestNextRetry =
+                earliestNextRetry === null ? nextRetryAt : Math.min(earliestNextRetry, nextRetryAt);
+            }
           }
-          this.notifySaleSynced(record.sale.id, syncedAt, true);
-        } catch (err: any) {
-          failed++;
-          const nextRetryCount = (record.retryCount || 0) + 1;
-          const backoffMs = computeBackoffMs(nextRetryCount);
-          const nextRetryAt = Date.now() + backoffMs;
-          const errorMsg = err?.message || 'Failed to push sale to Firestore';
-          this.lastError = errorMsg;
+        }
 
-          await offlineDb.updateOfflineSale(record.id, {
-            status: 'failed',
-            retryCount: nextRetryCount,
-            nextRetryAt: nextRetryCount <= record.maxRetries ? nextRetryAt : undefined,
-            lastError: errorMsg.slice(0, 240),
-          });
-
-          if (nextRetryCount <= record.maxRetries) {
+        // Also flush general IndexedDB entity queue (products stock, stores, customers, expenses, returns, logs)
+        const otherRes = await flushOfflineSyncQueue();
+        syncedOther = otherRes.synced;
+        failed += otherRes.failed;
+      } else {
+        // Server Online Ledger Sync for Email/Password & Local Boutique Sessions
+        const eligibleRecords = pendingSales.filter((record) => {
+          if (_reason !== 'manual' && record.nextRetryAt && record.nextRetryAt > now) {
             earliestNextRetry =
-              earliestNextRetry === null ? nextRetryAt : Math.min(earliestNextRetry, nextRetryAt);
+              earliestNextRetry === null ? record.nextRetryAt : Math.min(earliestNextRetry, record.nextRetryAt);
+            return false;
+          }
+          return true;
+        });
+
+        // Group by storeId so each boutique's sales reconcile cleanly
+        const byStore = new Map<string, OfflineSaleRecord[]>();
+        for (const rec of eligibleRecords) {
+          const list = byStore.get(rec.storeId) || [];
+          list.push(rec);
+          byStore.set(rec.storeId, list);
+        }
+
+        for (const [storeId, batch] of byStore.entries()) {
+          if (!navigator.onLine || this.isManualOffline) break;
+
+          for (const rec of batch) {
+            await offlineDb.updateOfflineSale(rec.id, { status: 'syncing', lastError: undefined });
+          }
+          await this.refreshSnapshot('syncing');
+
+          try {
+            const response = await fetch('/api/pos/sync-offline-sales', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                businessId: storeId,
+                sales: batch.map((r) => r.sale),
+              }),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Online sync returned HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (!data?.success) {
+              throw new Error(data?.error || 'Server rejected offline sale sync');
+            }
+
+            const serverTimestamp = data.serverTimestamp || new Date().toISOString();
+            const confirmedSet = new Set<string>(Array.isArray(data.syncedIds) ? data.syncedIds : []);
+
+            for (const rec of batch) {
+              if (confirmedSet.size === 0 || confirmedSet.has(rec.sale.id) || confirmedSet.has(rec.id)) {
+                await offlineDb.updateOfflineSale(rec.id, {
+                  status: 'synced',
+                  syncTarget: 'server',
+                  syncedAt: serverTimestamp,
+                  nextRetryAt: undefined,
+                  lastError: undefined,
+                });
+                syncedSales++;
+                this.syncedThisSession++;
+                syncedSaleIds.push(rec.sale.id);
+                if (rec.id !== rec.sale.id) {
+                  syncedSaleIds.push(rec.id);
+                }
+                this.notifySaleSynced(rec.sale.id, serverTimestamp, true);
+              }
+            }
+          } catch (err: any) {
+            const errorMsg = err?.message || 'Unable to reach online sync server';
+            this.lastError = errorMsg;
+            for (const rec of batch) {
+              failed++;
+              const nextRetryCount = (rec.retryCount || 0) + 1;
+              const backoffMs = computeBackoffMs(nextRetryCount);
+              const nextRetryAt = Date.now() + backoffMs;
+              await offlineDb.updateOfflineSale(rec.id, {
+                status: 'failed',
+                retryCount: nextRetryCount,
+                nextRetryAt: nextRetryCount <= rec.maxRetries ? nextRetryAt : undefined,
+                lastError: errorMsg.slice(0, 240),
+              });
+              if (nextRetryCount <= rec.maxRetries) {
+                earliestNextRetry =
+                  earliestNextRetry === null ? nextRetryAt : Math.min(earliestNextRetry, nextRetryAt);
+              }
+            }
           }
         }
       }
-
-      // Also flush general IndexedDB entity queue (products, stores, customers, expenses, returns, logs)
-      const otherRes = await flushOfflineSyncQueue();
-      const syncedOther = otherRes.synced;
-      failed += otherRes.failed;
 
       if (syncedSales > 0 || syncedOther > 0) {
         this.lastSyncAt = new Date().toISOString();
         this.broadcast({ type: 'QUEUE_UPDATED' });
       }
 
-      if (earliestNextRetry !== null && this.canSyncToCloud()) {
+      if (earliestNextRetry !== null && this.canSyncOnline()) {
         this.scheduleRetry(Math.max(1500, earliestNextRetry - Date.now()));
       }
 
@@ -636,7 +757,7 @@ class BackgroundSyncService {
     this.clearRetryTimer();
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
-      if (this.canSyncToCloud()) {
+      if (this.canSyncOnline()) {
         void this.syncNow('backoff_retry');
       }
     }, delayMs);

@@ -1083,27 +1083,123 @@ Return strictly JSON:
   }
 });
 
-// 6. Offline Sales Reconcile & Cloud Sync Endpoint
+// 6. Offline Sales Reconcile & Cloud Sync Endpoint (Durable Server Ledger)
+const OFFLINE_SYNC_LEDGER_DIR = path.join(__dirname, '.data');
+const OFFLINE_SYNC_LEDGER_FILE = path.join(OFFLINE_SYNC_LEDGER_DIR, 'synced-sales-ledger.json');
+
+interface ServerSyncedLedger {
+  salesByStore: Record<string, Record<string, any>>;
+  stockByStore: Record<string, Record<string, { stockQuantity: number; updatedAt: string }>>;
+  lastUpdatedAt: string;
+}
+
+function readServerSyncedLedger(): ServerSyncedLedger {
+  try {
+    if (fs.existsSync(OFFLINE_SYNC_LEDGER_FILE)) {
+      const raw = fs.readFileSync(OFFLINE_SYNC_LEDGER_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      return {
+        salesByStore: parsed?.salesByStore && typeof parsed.salesByStore === 'object' ? parsed.salesByStore : {},
+        stockByStore: parsed?.stockByStore && typeof parsed.stockByStore === 'object' ? parsed.stockByStore : {},
+        lastUpdatedAt: typeof parsed?.lastUpdatedAt === 'string' ? parsed.lastUpdatedAt : new Date().toISOString(),
+      };
+    }
+  } catch (err) {
+    console.warn('Could not read synced sales ledger, initializing fresh ledger:', err);
+  }
+  return { salesByStore: {}, stockByStore: {}, lastUpdatedAt: new Date().toISOString() };
+}
+
+function writeServerSyncedLedger(ledger: ServerSyncedLedger): void {
+  try {
+    if (!fs.existsSync(OFFLINE_SYNC_LEDGER_DIR)) {
+      fs.mkdirSync(OFFLINE_SYNC_LEDGER_DIR, { recursive: true });
+    }
+    fs.writeFileSync(OFFLINE_SYNC_LEDGER_FILE, JSON.stringify(ledger, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('Could not persist synced sales ledger to disk:', err);
+  }
+}
+
 app.post('/api/pos/sync-offline-sales', async (req, res) => {
   try {
-    const { sales, businessId } = req.body;
+    const { sales, businessId, stockUpdates } = req.body || {};
     if (!sales || !Array.isArray(sales)) {
       return res.status(400).json({ error: 'Sales array is required.' });
     }
 
-    const syncedIds = sales.map((s: any) => s.id);
+    const storeKey = String(businessId || 'default').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128) || 'default';
     const serverTimestamp = new Date().toISOString();
+    const ledger = readServerSyncedLedger();
+
+    if (!ledger.salesByStore[storeKey]) {
+      ledger.salesByStore[storeKey] = {};
+    }
+    if (!ledger.stockByStore[storeKey]) {
+      ledger.stockByStore[storeKey] = {};
+    }
+
+    const syncedIds: string[] = [];
+    for (const rawSale of sales) {
+      if (!rawSale || typeof rawSale !== 'object' || !rawSale.id) continue;
+      const saleId = String(rawSale.id).slice(0, 128);
+      ledger.salesByStore[storeKey][saleId] = {
+        ...rawSale,
+        id: saleId,
+        isOfflineSyncPending: false,
+        syncedAt: serverTimestamp,
+        serverUpdatedAt: serverTimestamp,
+      };
+      syncedIds.push(saleId);
+    }
+
+    if (Array.isArray(stockUpdates)) {
+      for (const upd of stockUpdates) {
+        if (!upd || !upd.productId) continue;
+        const prodId = String(upd.productId).slice(0, 128);
+        ledger.stockByStore[storeKey][prodId] = {
+          stockQuantity: Math.max(0, Number(upd.stockQuantity) || 0),
+          updatedAt: serverTimestamp,
+        };
+      }
+    }
+
+    ledger.lastUpdatedAt = serverTimestamp;
+    writeServerSyncedLedger(ledger);
 
     return res.json({
       success: true,
-      syncedCount: sales.length,
+      syncedCount: syncedIds.length,
       syncedIds,
       serverTimestamp,
-      message: `Successfully synchronized ${sales.length} offline transactions with cloud database.`,
+      totalStoredForStore: Object.keys(ledger.salesByStore[storeKey]).length,
+      message: `Updated ${syncedIds.length} offline sale${syncedIds.length === 1 ? '' : 's'} online.`,
     });
   } catch (error: any) {
     console.error('Error syncing offline sales:', error);
     return res.status(500).json({ error: error.message || 'Sync failed' });
+  }
+});
+
+app.get('/api/pos/synced-sales', async (req, res) => {
+  try {
+    const rawBiz = typeof req.query.businessId === 'string' ? req.query.businessId : 'default';
+    const storeKey = rawBiz.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128) || 'default';
+    const ledger = readServerSyncedLedger();
+    const storeSales = Object.values(ledger.salesByStore[storeKey] || {}).sort((a: any, b: any) =>
+      String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
+    );
+
+    return res.json({
+      success: true,
+      businessId: storeKey,
+      sales: storeSales,
+      stockUpdates: ledger.stockByStore[storeKey] || {},
+      lastUpdatedAt: ledger.lastUpdatedAt,
+    });
+  } catch (error: any) {
+    console.error('Error fetching synced sales:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load synced sales' });
   }
 });
 

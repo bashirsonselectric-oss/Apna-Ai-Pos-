@@ -70,6 +70,53 @@ export async function ensureCloudUserProfile(displayName: string, activeStoreId?
   }
 }
 
+const ensuredStoreCache = new Set<string>();
+
+export async function ensureCloudStoreExists(
+  storeIdRaw: string,
+  meta?: { businessName?: string; currency?: string; vertical?: string; phone?: string; city?: string }
+): Promise<boolean> {
+  const user = auth.currentUser;
+  if (!user || !user.emailVerified || !navigator.onLine) return false;
+
+  const ownerId = sanitizeFirestoreId(user.uid);
+  const storeId = sanitizeFirestoreId(storeIdRaw);
+  const cacheKey = `${ownerId}::${storeId}`;
+  if (ensuredStoreCache.has(cacheKey)) return true;
+
+  const path = `stores/${storeId}`;
+  try {
+    const ref = doc(db, 'stores', storeId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.ownerId === ownerId || user.email?.toLowerCase().trim() === 'bashirsonselectric@gmail.com') {
+        ensuredStoreCache.add(cacheKey);
+        return true;
+      }
+      return false;
+    }
+
+    await setDoc(ref, {
+      id: storeId,
+      ownerId,
+      businessName: (String(meta?.businessName || '').trim() || 'My Boutique').slice(0, 160),
+      storeName: (String(meta?.businessName || '').trim() || 'Main Store').slice(0, 160),
+      currency: (String(meta?.currency || '').trim() || 'Rs.').slice(0, 12),
+      taxRate: 0,
+      vertical: (String(meta?.vertical || '').trim() || 'garments_fashion').slice(0, 64),
+      ...(meta?.phone ? { phone: String(meta.phone).slice(0, 40) } : {}),
+      ...(meta?.city ? { city: String(meta.city).slice(0, 100) } : {}),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    ensuredStoreCache.add(cacheKey);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
 export async function upsertCloudStore(biz: BusinessAccount, taxRate = 0, receiptFooter = ''): Promise<void> {
   const user = auth.currentUser;
   if (!user || !user.emailVerified) return;
@@ -147,7 +194,12 @@ export async function fetchCloudStores(): Promise<BusinessAccount[]> {
   }
 }
 
-export async function syncProductToCloud(storeIdRaw: string, product: Product, op: 'upsert' | 'delete' = 'upsert'): Promise<void> {
+export async function syncProductToCloud(
+  storeIdRaw: string,
+  product: Product,
+  op: 'upsert' | 'delete' = 'upsert',
+  forceOffline = false
+): Promise<void> {
   const user = auth.currentUser;
   if (!user || !user.emailVerified) return;
   const ownerId = sanitizeFirestoreId(user.uid);
@@ -161,7 +213,7 @@ export async function syncProductToCloud(storeIdRaw: string, product: Product, o
     await offlineDb.saveProductImage(imageId, ownerId, storeId, product.image);
   }
 
-  if (!navigator.onLine) {
+  if (forceOffline || !navigator.onLine) {
     await offlineDb.enqueueSyncItem({
       id: `prod_${storeId}_${productId}`,
       ownerId,
@@ -175,6 +227,9 @@ export async function syncProductToCloud(storeIdRaw: string, product: Product, o
 
   const path = `stores/${storeId}/products/${productId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId, { vertical: product.vertical });
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'products', productId);
     if (op === 'delete') {
       await deleteDoc(ref);
@@ -189,16 +244,16 @@ export async function syncProductToCloud(storeIdRaw: string, product: Product, o
     }));
 
     const common = {
-      name: String(product.name || 'Item').slice(0, 200),
+      name: (String(product.name || '').trim() || 'Item').slice(0, 200),
       ...(product.urduName ? { urduName: String(product.urduName).slice(0, 200) } : {}),
       barcode: String(product.barcode || '').slice(0, 64),
-      category: String(product.category || 'General').slice(0, 100),
-      vertical: String(product.vertical || 'electrical_hardware').slice(0, 64),
+      category: (String(product.category || '').trim() || 'General').slice(0, 100),
+      vertical: (String(product.vertical || '').trim() || 'garments_fashion').slice(0, 64),
       costPrice: Math.max(0, Number(product.costPrice) || 0),
       retailPrice: Math.max(0, Number(product.retailPrice) || 0),
       stockQuantity: Number(product.stockQuantity) || 0,
       minStockAlert: Math.max(0, Number(product.minStockAlert) || 0),
-      unit: String(product.unit || 'pcs').slice(0, 32),
+      unit: (String(product.unit || '').trim() || 'pcs').slice(0, 32),
       taxPercent: Math.max(0, Math.min(100, Number(product.taxPercent) || 0)),
       ...(product.size ? { size: String(product.size).slice(0, 64) } : {}),
       ...(product.color ? { color: String(product.color).slice(0, 64) } : {}),
@@ -223,6 +278,40 @@ export async function syncProductToCloud(storeIdRaw: string, product: Product, o
   }
 }
 
+export async function fetchCloudSales(storeIdRaw: string): Promise<SaleRecord[]> {
+  const user = auth.currentUser;
+  if (!user || !navigator.onLine) return [];
+  const ownerId = sanitizeFirestoreId(user.uid);
+  const storeId = sanitizeFirestoreId(storeIdRaw);
+  const path = `stores/${storeId}/sales`;
+  try {
+    const q = query(collection(db, 'stores', storeId, 'sales'), where('ownerId', '==', ownerId));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: String(data.id || d.id),
+        invoiceNo: String(data.invoiceNo || d.id),
+        timestamp: String(data.timestamp || new Date().toISOString()),
+        customerName: String(data.customerName || 'Walk-in Customer'),
+        customerPhone: data.customerPhone ? String(data.customerPhone) : undefined,
+        items: Array.isArray(data.items) ? data.items : [],
+        subtotal: Number(data.subtotal) || 0,
+        discountAmount: Number(data.discountAmount) || 0,
+        taxAmount: Number(data.taxAmount) || 0,
+        grandTotal: Number(data.grandTotal) || 0,
+        profit: Number(data.profit) || 0,
+        paymentMethod: (data.paymentMethod || 'cash') as SaleRecord['paymentMethod'],
+        isOfflineSale: false,
+        isOfflineSyncPending: false,
+        syncedAt: new Date().toISOString(),
+      };
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, path);
+  }
+}
+
 export async function syncSaleToCloud(storeIdRaw: string, sale: SaleRecord): Promise<void> {
   const user = auth.currentUser;
   if (!user || !user.emailVerified) return;
@@ -244,6 +333,9 @@ export async function syncSaleToCloud(storeIdRaw: string, sale: SaleRecord): Pro
 
   const path = `stores/${storeId}/sales/${saleId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId);
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'sales', saleId);
     const snap = await getDoc(ref);
     if (snap.exists()) return; // Idempotent: prevent duplicate offline sales!
@@ -305,6 +397,9 @@ export async function syncCustomerToCloud(storeIdRaw: string, khata: CustomerKha
 
   const path = `stores/${storeId}/customers/${custId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId);
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'customers', custId);
     const snap = await getDoc(ref);
     const common = {
@@ -346,6 +441,9 @@ export async function syncExpenseToCloud(storeIdRaw: string, expense: ExpenseRec
 
   const path = `stores/${storeId}/expenses/${expId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId);
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'expenses', expId);
     const snap = await getDoc(ref);
     if (snap.exists()) return;
@@ -387,6 +485,9 @@ export async function syncReturnToCloud(storeIdRaw: string, ret: ReturnRecord): 
 
   const path = `stores/${storeId}/returns/${retId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId);
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'returns', retId);
     const snap = await getDoc(ref);
     if (snap.exists()) return;
@@ -428,6 +529,9 @@ export async function syncActivityLogToCloud(entry: ActivityLogEntry): Promise<v
 
   const path = `stores/${storeId}/activityLogs/${logId}`;
   try {
+    const storeReady = await ensureCloudStoreExists(storeId);
+    if (!storeReady) return;
+
     const ref = doc(db, 'stores', storeId, 'activityLogs', logId);
     const snap = await getDoc(ref);
     if (snap.exists()) return;

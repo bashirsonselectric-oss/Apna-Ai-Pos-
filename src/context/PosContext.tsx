@@ -97,6 +97,7 @@ import {
   upsertCloudStore,
   syncProductToCloud,
   syncActivityLogToCloud,
+  fetchCloudSales,
 } from '../lib/firestoreSync';
 import { backgroundSyncService } from '../lib/backgroundSyncService';
 import {
@@ -2093,22 +2094,40 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Deduct stock across all variant lines in cart
+    // Deduct stock across all variant lines in cart and queue/sync updated stock online
+    const todayIsoDate = new Date().toISOString().split('T')[0];
+    const qtyByProductId = new Map<string, number>();
+    for (const c of cart) {
+      qtyByProductId.set(c.product.id, (qtyByProductId.get(c.product.id) || 0) + c.quantity);
+    }
+    const modifiedProducts: Product[] = products
+      .filter((prod) => (qtyByProductId.get(prod.id) || 0) > 0)
+      .map((prod) => ({
+        ...prod,
+        stockQuantity: Math.max(0, prod.stockQuantity - (qtyByProductId.get(prod.id) || 0)),
+        lastUpdated: todayIsoDate,
+      }));
+
     setProducts((prev) =>
       prev.map((prod) => {
-        const totalQty = cart
-          .filter((c) => c.product.id === prod.id)
-          .reduce((sum, c) => sum + c.quantity, 0);
+        const totalQty = qtyByProductId.get(prod.id) || 0;
         if (totalQty > 0) {
           return {
             ...prod,
             stockQuantity: Math.max(0, prod.stockQuantity - totalQty),
-            lastUpdated: new Date().toISOString().split('T')[0],
+            lastUpdated: todayIsoDate,
           };
         }
         return prod;
       })
     );
+
+    // Push stock deductions to Cloud Firestore (or enqueue in IndexedDB when offline)
+    if (modifiedProducts.length > 0) {
+      for (const updatedProd of modifiedProducts) {
+        void syncProductToCloud(activeBusinessId, updatedProd, 'upsert', currentIsOffline).catch(() => {});
+      }
+    }
 
     setSales((prev) => [saleRecord, ...prev]);
 
@@ -3169,7 +3188,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const syncOfflineSales = async (): Promise<{ success: boolean; count: number; message?: string }> => {
     setIsSyncing(true);
     try {
-      // 1. Ensure any legacy localStorage-queued sales are also persisted in IndexedDB
+      // 1. Ensure all pending offline sales (from queue or sales list) are persisted in IndexedDB
       const activeBiz = businessAccounts.find((b) => b.id === activeBusinessId);
       const storeMeta = {
         businessName: activeBiz?.businessName || storeProfile.name,
@@ -3178,16 +3197,27 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         phone: activeBiz?.phone || storeProfile.phone,
         city: activeBiz?.city,
       };
+
+      const pendingMap = new Map<string, SaleRecord>();
       for (const queuedSale of offlineSalesQueue) {
+        pendingMap.set(queuedSale.id, queuedSale);
+      }
+      for (const s of sales) {
+        if (s.isOfflineSyncPending && !pendingMap.has(s.id)) {
+          pendingMap.set(s.id, s);
+        }
+      }
+
+      for (const queuedSale of pendingMap.values()) {
         const existing = await offlineDb.getOfflineSale(sanitizeFirestoreId(queuedSale.id));
         if (!existing) {
           await backgroundSyncService.cacheAndSyncSale(activeBusinessId, queuedSale, storeMeta, true);
         }
       }
 
-      // 2. Run BackgroundSyncService (IndexedDB -> Cloud Firestore)
+      // 2. Run BackgroundSyncService (IndexedDB -> Cloud Firestore or persistent Server Ledger)
       const bgRes = await backgroundSyncService.syncNow('manual');
-      let syncedCount = bgRes.syncedSales + bgRes.syncedOther;
+      const syncedCount = bgRes.syncedSales + bgRes.syncedOther;
       const syncedIdSet = new Set<string>(bgRes.syncedSaleIds);
 
       // 3. Reconcile synced sales in React state & localStorage queue
@@ -3213,25 +3243,38 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
 
-      // 4. Optional local backend ledger ping when online
-      if (navigator.onLine && !isOffline && offlineSalesQueue.length > 0 && bgRes.skippedReason === 'unauthenticated') {
+      // 4. Pull & merge latest online sales from Firestore (when verified) to keep devices aligned
+      if (navigator.onLine && !isOffline && auth.currentUser?.emailVerified) {
         try {
-          const res = await fetch('/api/pos/sync-offline-sales', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sales: offlineSalesQueue,
-              businessId: activeBusinessId,
-              cartCount: cart.length,
-              totalSalesRecorded: sales.length,
-            }),
-          });
-          const data = await res.json();
-          if (data.success && Array.isArray(data.syncedIds)) {
-            syncedCount += data.syncedIds.length;
+          const cloudSales = await fetchCloudSales(activeBusinessId);
+          if (cloudSales.length > 0) {
+            setSales((prev) => {
+              const existingMap = new Map<string, SaleRecord>();
+              for (const s of prev) {
+                existingMap.set(sanitizeFirestoreId(s.id), s);
+              }
+              let changed = false;
+              const additions: SaleRecord[] = [];
+              for (const cs of cloudSales) {
+                const key = sanitizeFirestoreId(cs.id);
+                const local = existingMap.get(key);
+                if (!local) {
+                  additions.push(cs);
+                  changed = true;
+                } else if (local.isOfflineSyncPending) {
+                  existingMap.set(key, { ...local, isOfflineSyncPending: false, syncedAt: cs.syncedAt });
+                  changed = true;
+                }
+              }
+              if (!changed) return prev;
+              const merged = [...additions, ...Array.from(existingMap.values())].sort((a, b) =>
+                String(b.timestamp || '').localeCompare(String(a.timestamp || ''))
+              );
+              return merged;
+            });
           }
         } catch {
-          // Non-blocking fallback
+          // Non-blocking cloud fetch fallback
         }
       }
 
@@ -3240,19 +3283,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(`apna_pos_${activeBusinessId}_last_sync`, nowStr);
 
       if (syncedCount > 0) {
-        logActivity('sync', 'Background Sync Completed', `Pushed ${syncedCount} cached record(s) to Firestore`);
+        logActivity(
+          'sync',
+          'Offline Sales Updated Online',
+          `Updated ${syncedCount} offline record${syncedCount === 1 ? '' : 's'} online successfully`
+        );
         sounds.playCheckoutChime();
       }
 
       if (bgRes.skippedReason === 'offline') {
-        return { success: false, count: 0, message: 'Offline — transactions cached safely in IndexedDB' };
-      }
-      if (bgRes.skippedReason === 'unauthenticated') {
-        return {
-          success: true,
-          count: syncedCount,
-          message: 'Cached in IndexedDB — sign in with Google to push to Firestore',
-        };
+        return { success: false, count: 0, message: 'Offline — sales cached safely in IndexedDB' };
       }
 
       return {
@@ -3260,10 +3300,10 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         count: syncedCount,
         message:
           syncedCount > 0
-            ? `Synced ${syncedCount} transaction${syncedCount === 1 ? '' : 's'} to Firestore`
+            ? `Updated ${syncedCount} offline sale${syncedCount === 1 ? '' : 's'} online`
             : bgRes.failed > 0
             ? `${bgRes.failed} item(s) waiting for retry`
-            : 'All transactions synced with Firestore',
+            : 'All sales up to date online',
       };
     } catch (err: any) {
       console.warn('Background sync failed, retrying automatically:', err);
@@ -3330,8 +3370,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [activeBusinessId]);
 
+  const prevOfflineRef = React.useRef<boolean>(isOffline);
   useEffect(() => {
     backgroundSyncService.setManualOffline(isOffline);
+    const transitionedToOnline = prevOfflineRef.current && !isOffline;
+    prevOfflineRef.current = isOffline;
+
+    if (transitionedToOnline && navigator.onLine) {
+      // Automatically update all pending offline sales online when connectivity returns
+      void syncOfflineSales();
+    }
   }, [isOffline]);
 
   // ---------------- STOCK BACKUPS (MANUAL & AI DAILY) ----------------
