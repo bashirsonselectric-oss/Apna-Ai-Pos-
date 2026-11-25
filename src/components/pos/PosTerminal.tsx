@@ -48,9 +48,12 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     activeVertical,
     cart,
     addToCart,
+    addMultipleColorsToCart,
     removeCartItemAt,
     updateCartItemAt,
     clearCart,
+    getLiveColorStock,
+    getRemainingColorStock,
     heldOrders,
     holdCurrentOrder,
     resumeHeldOrder,
@@ -109,10 +112,12 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
   const [heldOrdersOpen, setHeldOrdersOpen] = useState(false);
   const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
 
-  // Variant Modal for quick detailed selection
+  // Multi-Color Article Selection Modal State
   const [variantModalProduct, setVariantModalProduct] = useState<Product | null>(null);
   const [modalColor, setModalColor] = useState('');
   const [modalSize, setModalSize] = useState('');
+  const [modalColorQtys, setModalColorQtys] = useState<Record<string, number>>({});
+  const [modalError, setModalError] = useState<string | null>(null);
 
   // AI Smart Voice / Visual Search
   const [isAiSearching, setIsAiSearching] = useState(false);
@@ -235,8 +240,14 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
   const colorOptions = useMemo(() => {
     const set = new Set<string>();
     filteredProducts.forEach((p) => {
-      if (p.color) set.add(p.color);
-      p.colorVariants?.forEach((cv) => set.add(cv.color));
+      if (p.colorVariants && p.colorVariants.length > 0) {
+        // Main rule: only expose colors with available stock > 0 in POS filter
+        p.colorVariants.forEach((cv) => {
+          if (cv.inStock !== false && cv.stock > 0) set.add(cv.color);
+        });
+      } else if (p.color && p.stockQuantity > 0) {
+        set.add(p.color);
+      }
     });
     return ['All', ...Array.from(set)];
   }, [filteredProducts]);
@@ -275,12 +286,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       }
 
       if (selectedColorFilter !== 'All') {
-        const allColors = [
-          product.color,
-          ...(product.colorVariants?.map((c) => c.color) || []),
-          ...(product.options?.colors || []),
-        ].filter(Boolean);
-        if (!allColors.includes(selectedColorFilter)) return false;
+        const availableColors =
+          product.colorVariants && product.colorVariants.length > 0
+            ? product.colorVariants
+                .filter((c) => c.inStock !== false && c.stock > 0)
+                .map((c) => c.color)
+            : [product.color].filter(Boolean);
+        if (!availableColors.includes(selectedColorFilter)) return false;
       }
 
       if (priceRange === 'under_10k' && product.retailPrice >= 10000) return false;
@@ -290,13 +302,20 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
       if (lowStockOnly && product.stockQuantity > product.minStockAlert) return false;
 
       if (query) {
+        const availableColorNames = (product.colorVariants || [])
+          .filter((cv) => cv.inStock !== false && cv.stock > 0)
+          .map((cv) => cv.color)
+          .join(' ');
         const haystack = [
+          product.articleNumber || '',
+          String(product.verticalAttributes?.articleNumber || ''),
           product.name,
           product.urduName || '',
           product.barcode,
           product.category,
           String(product.verticalAttributes?.brand || ''),
           String(product.verticalAttributes?.collection || ''),
+          availableColorNames,
           product.color || '',
           product.size || '',
         ]
@@ -335,24 +354,38 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     setSearchQuery('');
   };
 
-  // Barcode submit
+  // Barcode / Article submit
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const code = barcodeInput.trim();
     if (!code) return;
 
     const matched = filteredProducts.find(
-      (p) => p.barcode.trim().toLowerCase() === code.toLowerCase()
+      (p) =>
+        p.barcode.trim().toLowerCase() === code.toLowerCase() ||
+        (p.articleNumber || '').trim().toLowerCase() === code.toLowerCase()
     );
     if (matched) {
-      addToCart(matched, 1, {
-        selectedColor: matched.colorVariants?.find((c) => c.inStock !== false)?.color || matched.color,
+      const availableColors = (matched.colorVariants || []).filter(
+        (cv) => cv.inStock !== false && getRemainingColorStock(matched.id, cv.color) > 0
+      );
+      if (availableColors.length > 1) {
+        openVariantModal(matched);
+        setBarcodeInput('');
+        return;
+      }
+      const res = addToCart(matched, 1, {
+        selectedColor: availableColors[0]?.color || matched.color,
         selectedSize: matched.size || matched.options?.sizes?.[0],
       });
+      if (!res.ok) {
+        showToast(res.error || 'Insufficient stock.', 'warn');
+        return;
+      }
       setBarcodeInput('');
-      showToast(`Added ${matched.name} (${matched.barcode})`, 'success');
+      showToast(`Added ${matched.articleNumber || matched.name} to cart`, 'success');
     } else {
-      showToast(`No SKU/barcode found for "${code}". Use + Add Piece to create it.`, 'warn');
+      showToast(`No article/barcode found for "${code}". Use + Add Piece to create it.`, 'warn');
     }
   };
 
@@ -384,33 +417,71 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
     showToast(`Applied ${found.code} — ${found.label}`, 'success');
   };
 
-  // Quick add from product card using selected swatch & size
+  // Quick add from product card (validates color stock strictly; opens multi-color picker if multi-color article)
   const handleQuickAddCard = (product: Product) => {
-    const sel = cardVariantSelections[product.id];
-    const firstInStockColor =
-      product.colorVariants?.find((cv) => cv.inStock !== false && cv.stock > 0)?.color ||
-      product.color ||
-      '';
-    const chosenColor = sel?.color || firstInStockColor;
-    const chosenSize = sel?.size || product.size || product.options?.sizes?.[0] || '';
+    const hasVariants = !!(product.colorVariants && product.colorVariants.length > 0);
+    if (hasVariants) {
+      const sel = cardVariantSelections[product.id];
+      const availableColors = product.colorVariants!.filter(
+        (cv) => cv.inStock !== false && getRemainingColorStock(product.id, cv.color) > 0
+      );
+      if (availableColors.length === 0) {
+        showToast(`${product.articleNumber || product.name} is completely Out of Stock.`, 'warn');
+        return;
+      }
+      // If user explicitly tapped a specific color swatch on the card, quick-add 1 of that color
+      if (sel?.color && availableColors.some((c) => c.color === sel.color)) {
+        const chosenSize = sel.size || product.size || product.options?.sizes?.[0] || '';
+        const res = addToCart(product, 1, {
+          selectedColor: sel.color,
+          selectedSize: chosenSize,
+        });
+        if (!res.ok) {
+          showToast(res.error || 'Cannot exceed available stock.', 'warn');
+          return;
+        }
+        showToast(
+          `Added 1 × ${product.articleNumber || product.name} (${sel.color})`,
+          'success'
+        );
+        return;
+      }
+      // Otherwise open the Multi-Color Quantity Picker so cashier can pick multiple colors in one action
+      openVariantModal(product);
+      return;
+    }
 
-    addToCart(product, 1, {
-      selectedColor: chosenColor,
+    const sel = cardVariantSelections[product.id];
+    const chosenSize = sel?.size || product.size || product.options?.sizes?.[0] || '';
+    const res = addToCart(product, 1, {
+      selectedColor: product.color || '',
       selectedSize: chosenSize,
     });
+    if (!res.ok) {
+      showToast(res.error || 'Out of stock.', 'warn');
+      return;
+    }
     showToast(`Added ${product.name}${chosenSize ? ` · ${chosenSize}` : ''}`, 'success');
   };
 
-  // Open variant modal
+  // Open Multi-Color Quantity Picker Modal (automatically excludes all 0-stock colors)
   const openVariantModal = (product: Product) => {
     const sel = cardVariantSelections[product.id];
-    const firstAvailable =
-      product.colorVariants?.find((cv) => cv.inStock !== false && cv.stock > 0)?.color ||
-      product.color ||
-      '';
+    const availableColors = (product.colorVariants || []).filter(
+      (cv) => cv.inStock !== false && getRemainingColorStock(product.id, cv.color) > 0
+    );
+    const firstAvailable = availableColors[0]?.color || product.color || '';
     setVariantModalProduct(product);
-    setModalColor(sel?.color || firstAvailable);
+    setModalColor(
+      sel?.color && availableColors.some((c) => c.color === sel.color) ? sel.color : firstAvailable
+    );
     setModalSize(sel?.size || product.size || product.options?.sizes?.[0] || '');
+    const initialQtys: Record<string, number> = {};
+    availableColors.forEach((cv) => {
+      initialQtys[cv.color] = 0;
+    });
+    setModalColorQtys(initialQtys);
+    setModalError(null);
   };
 
   // Voice & Visual AI Smart Search
@@ -885,28 +956,46 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
               {displayedProducts.map((product) => {
                 const sel = cardVariantSelections[product.id] || {};
-                const availableColors = product.colorVariants || [];
+                const hasColorVariants = !!(product.colorVariants && product.colorVariants.length > 0);
+                // MAIN RULE: Show ONLY available colors (stock > 0) in POS — zero-stock colors are automatically hidden!
+                const availableColors = hasColorVariants
+                  ? product.colorVariants!.filter(
+                      (cv) => cv.inStock !== false && cv.stock > 0 && getRemainingColorStock(product.id, cv.color) > 0
+                    )
+                  : [];
+                const totalRemainingStock = hasColorVariants
+                  ? availableColors.reduce(
+                      (sum, cv) => sum + getRemainingColorStock(product.id, cv.color),
+                      0
+                    )
+                  : getRemainingColorStock(product.id);
                 const availableSizes = product.options?.sizes || (product.size ? [product.size] : []);
                 const activeColor =
-                  sel.color ||
-                  availableColors.find((c) => c.inStock !== false && c.stock > 0)?.color ||
-                  product.color ||
-                  '';
+                  sel.color && availableColors.some((c) => c.color === sel.color)
+                    ? sel.color
+                    : '';
                 const activeSize = sel.size || product.size || availableSizes[0] || '';
-                const isOutOfStock = product.stockQuantity <= 0;
-                const isLowStock = !isOutOfStock && product.stockQuantity <= product.minStockAlert;
-                const brandName = product.verticalAttributes?.brand || product.category;
+                const isOutOfStock = totalRemainingStock <= 0;
+                const isLowStock = !isOutOfStock && totalRemainingStock <= product.minStockAlert;
+                const articleLabel =
+                  product.articleNumber || product.verticalAttributes?.articleNumber || product.barcode;
 
                 return (
                   <div
                     key={product.id}
-                    className="group rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] hover:border-[#141414]/35 dark:hover:border-[#E5C6C3]/40 overflow-hidden transition-all flex flex-col justify-between"
+                    className={`group rounded-2xl bg-white dark:bg-[#1A1816] border border-[#E8E0D8] dark:border-[#2E2A26] overflow-hidden transition-all flex flex-col justify-between ${
+                      isOutOfStock
+                        ? 'opacity-70'
+                        : 'hover:border-[#141414]/35 dark:hover:border-[#E5C6C3]/40'
+                    }`}
                   >
                     <div>
                       {/* Studio Photography Frame (4:3) */}
                       <div
-                        onClick={() => openVariantModal(product)}
-                        className="relative aspect-[4/3] bg-[#F6F1EB] dark:bg-[#221F1C] overflow-hidden cursor-pointer"
+                        onClick={() => !isOutOfStock && openVariantModal(product)}
+                        className={`relative aspect-[4/3] bg-[#F6F1EB] dark:bg-[#221F1C] overflow-hidden ${
+                          isOutOfStock ? 'cursor-not-allowed' : 'cursor-pointer'
+                        }`}
                       >
                         {product.image ? (
                           <img
@@ -924,14 +1013,13 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                           </div>
                         )}
 
-                        {/* Subtle Stock Corner Cue (Only when low/out) */}
                         {isOutOfStock ? (
                           <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-[#141414]/90 text-white text-[10px] font-semibold">
                             Out of Stock
                           </div>
                         ) : isLowStock ? (
                           <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-[#F3E1DF]/95 text-[#8A2626] text-[10px] font-semibold border border-[#E5C6C3]">
-                            Only {product.stockQuantity} left
+                            Only {totalRemainingStock} left
                           </div>
                         ) : null}
                       </div>
@@ -940,17 +1028,18 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                       <div className="p-3.5 space-y-2.5">
                         <div className="space-y-0.5">
                           <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8A7E75] dark:text-[#A89E96] truncate">
-                            {brandName} · <span className="font-mono-numbers">{product.barcode}</span>
+                            <span className="text-[#141414] dark:text-[#F3E1DF]">{articleLabel}</span> ·{' '}
+                            <span>{product.category}</span>
                           </div>
                           <h3
-                            onClick={() => openVariantModal(product)}
+                            onClick={() => !isOutOfStock && openVariantModal(product)}
                             className="text-[13px] font-semibold text-[#141414] dark:text-[#F6F1EB] leading-snug line-clamp-2 cursor-pointer hover:underline"
                           >
                             {product.name}
                           </h3>
                         </div>
 
-                        {/* Price & Stock Line */}
+                        {/* Price & Live Remaining Stock Line */}
                         <div className="flex items-baseline justify-between gap-2">
                           <div className="font-mono-numbers text-base font-bold text-[#141414] dark:text-[#F6F1EB]">
                             {storeProfile.currency} {product.retailPrice.toLocaleString()}
@@ -964,48 +1053,67 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                                 : 'text-[#7D6E65] dark:text-[#A89E96]'
                             }`}
                           >
-                            {product.stockQuantity} {product.unit}
+                            {totalRemainingStock} {product.unit} left
                           </div>
                         </div>
 
-                        {/* Interactive Color Swatches (with Out-of-Stock Strike Highlight) */}
-                        {availableColors.length > 0 && (
-                          <div className="flex items-center justify-between gap-2 pt-0.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {availableColors.slice(0, 5).map((cv) => {
-                                const isSoldOut = cv.inStock === false || cv.stock <= 0;
-                                const isChosen = activeColor === cv.color;
-                                return (
-                                  <button
-                                    key={cv.color}
-                                    type="button"
-                                    disabled={isSoldOut}
-                                    title={isSoldOut ? `${cv.color} (Out of stock)` : `${cv.color} (${cv.stock} left)`}
-                                    onClick={() =>
-                                      setCardVariantSelections((prev) => ({
-                                        ...prev,
-                                        [product.id]: { ...prev[product.id], color: cv.color },
-                                      }))
-                                    }
-                                    className={`relative w-4 h-4 rounded-full border transition-transform ${
-                                      isChosen
-                                        ? 'ring-2 ring-offset-1 ring-[#141414] dark:ring-[#F6F1EB] scale-110'
-                                        : 'border-black/20 dark:border-white/25'
-                                    } ${isSoldOut ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer hover:scale-110'}`}
-                                    style={{ backgroundColor: cv.hex || '#C9B8A8' }}
-                                  >
-                                    {isSoldOut && (
-                                      <span className="absolute inset-0 flex items-center justify-center">
-                                        <span className="w-4 h-[1.5px] bg-[#9B2C2C] rotate-45 block" />
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <span className="text-[10px] text-[#7D6E65] dark:text-[#A89E96] truncate max-w-[95px]">
-                              {activeColor}
-                            </span>
+                        {/* Available-Only Color Swatches (Zero-stock colors are strictly hidden in POS) */}
+                        {hasColorVariants && (
+                          <div className="space-y-1.5 pt-0.5">
+                            {availableColors.length === 0 ? (
+                              <div className="text-[11px] text-[#9B2C2C] dark:text-[#FCA5A5] font-medium">
+                                All colors sold out
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-between text-[10px] text-[#7D6E65] dark:text-[#A89E96]">
+                                  <span>
+                                    <strong className="font-mono-numbers text-[#141414] dark:text-[#F6F1EB]">
+                                      {availableColors.length}
+                                    </strong>{' '}
+                                    available color{availableColors.length === 1 ? '' : 's'}
+                                  </span>
+                                  {activeColor && (
+                                    <span className="font-semibold text-[#141414] dark:text-[#F6F1EB] truncate max-w-[110px]">
+                                      {activeColor} ({getRemainingColorStock(product.id, activeColor)})
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {availableColors.slice(0, 10).map((cv) => {
+                                    const rem = getRemainingColorStock(product.id, cv.color);
+                                    const isChosen = activeColor === cv.color;
+                                    return (
+                                      <button
+                                        key={cv.color}
+                                        type="button"
+                                        title={`${cv.color}: ${rem} ${product.unit} available`}
+                                        onClick={() =>
+                                          setCardVariantSelections((prev) => ({
+                                            ...prev,
+                                            [product.id]: {
+                                              ...prev[product.id],
+                                              color: isChosen ? undefined : cv.color,
+                                            },
+                                          }))
+                                        }
+                                        className={`w-4.5 h-4.5 rounded-full border transition-transform cursor-pointer hover:scale-110 ${
+                                          isChosen
+                                            ? 'ring-2 ring-offset-1 ring-[#141414] dark:ring-[#F6F1EB] scale-110 border-[#141414]'
+                                            : 'border-black/25 dark:border-white/30'
+                                        }`}
+                                        style={{ backgroundColor: cv.hex || '#C9B8A8' }}
+                                      />
+                                    );
+                                  })}
+                                  {availableColors.length > 10 && (
+                                    <span className="text-[10px] font-mono-numbers text-[#7D6E65]">
+                                      +{availableColors.length - 10}
+                                    </span>
+                                  )}
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
 
@@ -1039,20 +1147,44 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                       </div>
                     </div>
 
-                    {/* Add to Cart Footer */}
-                    <div className="px-3.5 pb-3.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleQuickAddCard(product)}
-                        className={`w-full py-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                          isOutOfStock
-                            ? 'bg-[#F6F1EB] dark:bg-[#24201C] text-[#7D6E65] border border-[#E8E0D8] dark:border-[#2E2A26] hover:bg-[#EFE8E0]'
-                            : 'bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414]'
-                        }`}
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{isOutOfStock ? 'Add for Quote' : 'Add to Cart'}</span>
-                      </button>
+                    {/* Add to Cart / Multi-Color Select Footer */}
+                    <div className="px-3.5 pb-3.5 pt-1 flex items-center gap-1.5">
+                      {hasColorVariants && !isOutOfStock ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openVariantModal(product)}
+                            className="flex-1 py-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414]"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Select Colors ({availableColors.length})</span>
+                          </button>
+                          {activeColor && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickAddCard(product)}
+                              title={`Quick add 1 × ${activeColor}`}
+                              className="px-2.5 py-2 rounded-xl text-xs font-semibold border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#24201C] text-[#141414] dark:text-[#F6F1EB] hover:bg-[#EFE8E0] cursor-pointer whitespace-nowrap"
+                            >
+                              +1
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isOutOfStock}
+                          onClick={() => handleQuickAddCard(product)}
+                          className={`w-full py-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                            isOutOfStock
+                              ? 'bg-[#F6F1EB] dark:bg-[#24201C] text-[#9B2C2C] border border-[#E5C6C3] cursor-not-allowed opacity-75'
+                              : 'bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414] cursor-pointer'
+                          }`}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{isOutOfStock ? 'Out of Stock' : 'Add to Cart'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1274,20 +1406,31 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                 </div>
               ) : (
                 cart.map((item, idx) => {
-                  const sizes = item.product.options?.sizes || (item.product.size ? [item.product.size] : []);
-                  const colors =
-                    item.product.colorVariants?.filter((c) => c.inStock !== false).map((c) => c.color) ||
-                    item.product.options?.colors ||
-                    (item.product.color ? [item.product.color] : []);
+                  const liveProd = products.find((p) => p.id === item.product.id) || item.product;
+                  const sizes = liveProd.options?.sizes || (liveProd.size ? [liveProd.size] : []);
+                  const availableColorList =
+                    liveProd.colorVariants && liveProd.colorVariants.length > 0
+                      ? liveProd.colorVariants
+                          .filter((c) => c.inStock !== false && c.stock > 0)
+                          .map((c) => c.color)
+                      : liveProd.color
+                      ? [liveProd.color]
+                      : [];
+                  const matchedVariant = liveProd.colorVariants?.find(
+                    (cv) => cv.color.toLowerCase() === (item.selectedColor || '').toLowerCase()
+                  );
+                  const maxAllowed = getRemainingColorStock(liveProd.id, item.selectedColor, idx);
+                  const articleLabel =
+                    liveProd.articleNumber || liveProd.verticalAttributes?.articleNumber || liveProd.barcode;
 
                   return (
-                    <div key={`${item.product.id}-${idx}`} className="p-3.5 flex gap-3 items-start">
+                    <div key={`${item.product.id}-${item.selectedColor || 'def'}-${idx}`} className="p-3.5 flex gap-3 items-start">
                       {/* Thumbnail */}
                       <div className="w-13 h-13 rounded-xl bg-[#F6F1EB] dark:bg-[#221F1C] border border-[#E8E0D8] dark:border-[#2E2A26] overflow-hidden shrink-0">
-                        {item.product.image ? (
+                        {liveProd.image ? (
                           <img
-                            src={item.product.image}
-                            alt={item.product.name}
+                            src={liveProd.image}
+                            alt={liveProd.name}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
                           />
@@ -1298,11 +1441,26 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                         )}
                       </div>
 
-                      {/* Item Info & Inline Variant Pickers */}
+                      {/* Item Info: Article #, Color Swatch, Qty, Price & Subtotal */}
                       <div className="flex-1 min-w-0 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] leading-snug line-clamp-2">
-                            {item.product.name}
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#7D6E65] dark:text-[#A89E96] truncate">
+                              {articleLabel}
+                              {item.selectedColor && (
+                                <span className="ml-1.5 inline-flex items-center gap-1 normal-case tracking-normal text-[#141414] dark:text-[#F6F1EB] font-semibold">
+                                  ·
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full inline-block border border-black/20"
+                                    style={{ backgroundColor: matchedVariant?.hex || '#64748B' }}
+                                  />
+                                  {item.selectedColor}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] leading-snug line-clamp-1">
+                              {liveProd.name}
+                            </div>
                           </div>
                           <button
                             type="button"
@@ -1314,8 +1472,8 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                           </button>
                         </div>
 
-                        {/* Inline Size & Color Selectors */}
-                        {(sizes.length > 0 || colors.length > 0) && (
+                        {/* Inline Size & Available-Only Color Selectors */}
+                        {(sizes.length > 0 || availableColorList.length > 0) && (
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {sizes.length > 0 && (
                               <select
@@ -1330,23 +1488,31 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                                 ))}
                               </select>
                             )}
-                            {colors.length > 0 && (
+                            {availableColorList.length > 0 && (
                               <select
-                                value={item.selectedColor || colors[0]}
-                                onChange={(e) => updateCartItemAt(idx, { selectedColor: e.target.value })}
-                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#121110] text-[#4A433E] dark:text-[#E8E0D8] max-w-[110px]"
+                                value={item.selectedColor || availableColorList[0]}
+                                onChange={(e) => {
+                                  const res = updateCartItemAt(idx, { selectedColor: e.target.value });
+                                  if (!res.ok) {
+                                    showToast(res.error || 'Color out of stock.', 'warn');
+                                  }
+                                }}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#121110] text-[#4A433E] dark:text-[#E8E0D8] max-w-[115px]"
                               >
-                                {colors.map((c) => (
+                                {availableColorList.map((c) => (
                                   <option key={c} value={c}>
-                                    {c}
+                                    {c} ({getLiveColorStock(liveProd.id, c)})
                                   </option>
                                 ))}
                               </select>
                             )}
+                            <span className="text-[10px] font-mono-numbers text-[#8A7E75]">
+                              Max {maxAllowed}
+                            </span>
                           </div>
                         )}
 
-                        {/* Unit Price + Qty Stepper + Line Total */}
+                        {/* Unit Price + Stock-Capped Qty Stepper + Line Subtotal */}
                         <div className="flex items-center justify-between pt-0.5">
                           <div className="inline-flex items-center rounded-lg border border-[#E8E0D8] dark:border-[#2E2A26] bg-[#FAF7F4] dark:bg-[#121110]">
                             <button
@@ -1361,8 +1527,17 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                             </span>
                             <button
                               type="button"
-                              onClick={() => updateCartItemAt(idx, { quantity: item.quantity + 1 })}
-                              className="px-2 py-1 text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#EFE8E0] dark:hover:bg-[#24201C] rounded-r-lg cursor-pointer"
+                              onClick={() => {
+                                const res = updateCartItemAt(idx, { quantity: item.quantity + 1 });
+                                if (!res.ok) {
+                                  showToast(res.error || 'Maximum available stock reached.', 'warn');
+                                }
+                              }}
+                              className={`px-2 py-1 rounded-r-lg transition-colors ${
+                                item.quantity >= maxAllowed
+                                  ? 'text-[#B5A99F] cursor-not-allowed opacity-50'
+                                  : 'text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#EFE8E0] dark:hover:bg-[#24201C] cursor-pointer'
+                              }`}
                             >
                               <Plus className="w-3 h-3" />
                             </button>
@@ -1373,7 +1548,7 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
                               {storeProfile.currency} {(item.quantity * item.unitPrice).toLocaleString()}
                             </div>
                             <div className="text-[10px] font-mono-numbers text-[#8A7E75]">
-                              {storeProfile.currency} {item.unitPrice.toLocaleString()} each
+                              {item.quantity} × {storeProfile.currency} {item.unitPrice.toLocaleString()}
                             </div>
                           </div>
                         </div>
@@ -1561,127 +1736,298 @@ export const PosTerminal: React.FC<PosTerminalProps> = ({
         </aside>
       </div>
 
-      {/* QUICK VARIANT DETAIL MODAL */}
-      {variantModalProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-          <div className="bg-white dark:bg-[#1A1816] rounded-2xl max-w-md w-full border border-[#E8E0D8] dark:border-[#2E2A26] shadow-2xl overflow-hidden">
-            <div className="relative aspect-[16/10] bg-[#F6F1EB] dark:bg-[#221F1C]">
-              {variantModalProduct.image && (
-                <img
-                  src={variantModalProduct.image}
-                  alt={variantModalProduct.name}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => setVariantModalProduct(null)}
-                className="absolute top-3 right-3 p-1.5 rounded-full bg-white/90 dark:bg-[#141414]/90 text-[#141414] dark:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* ARTICLE MULTI-COLOR QUANTITY PICKER MODAL (Zero-stock colors strictly hidden) */}
+      {variantModalProduct && (() => {
+        const liveModalProd =
+          products.find((p) => p.id === variantModalProduct.id) || variantModalProduct;
+        const hasColorVariants = !!(
+          liveModalProd.colorVariants && liveModalProd.colorVariants.length > 0
+        );
+        // MAIN RULE: Only list colors with remaining available stock > 0!
+        const availableVariants = hasColorVariants
+          ? liveModalProd.colorVariants!.filter(
+              (cv) =>
+                cv.inStock !== false &&
+                cv.stock > 0 &&
+                getRemainingColorStock(liveModalProd.id, cv.color) > 0
+            )
+          : [];
+        const totalAvailableNow = hasColorVariants
+          ? availableVariants.reduce(
+              (sum, cv) => sum + getRemainingColorStock(liveModalProd.id, cv.color),
+              0
+            )
+          : getRemainingColorStock(liveModalProd.id);
 
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7D6E65]">
-                  {variantModalProduct.verticalAttributes?.brand || variantModalProduct.category} ·{' '}
-                  <span className="font-mono-numbers">{variantModalProduct.barcode}</span>
+        const selectedEntries = availableVariants
+          .map((cv) => ({
+            color: cv.color,
+            hex: cv.hex,
+            quantity: Math.max(0, Number(modalColorQtys[cv.color]) || 0),
+          }))
+          .filter((e) => e.quantity > 0);
+        const totalSelectedUnits = selectedEntries.reduce((sum, e) => sum + e.quantity, 0);
+        const totalSelectedSubtotal = totalSelectedUnits * liveModalProd.retailPrice;
+        const articleLabel =
+          liveModalProd.articleNumber ||
+          liveModalProd.verticalAttributes?.articleNumber ||
+          liveModalProd.barcode;
+
+        const setColorQtySafe = (colorName: string, requested: number, maxStock: number) => {
+          if (requested < 0) {
+            setModalColorQtys((prev) => ({ ...prev, [colorName]: 0 }));
+            setModalError(null);
+            return;
+          }
+          if (requested > maxStock) {
+            setModalError(
+              `Cannot exceed stock for ${colorName}: maximum ${maxStock} ${liveModalProd.unit} available.`
+            );
+            setModalColorQtys((prev) => ({ ...prev, [colorName]: maxStock }));
+            return;
+          }
+          setModalError(null);
+          setModalColorQtys((prev) => ({ ...prev, [colorName]: requested }));
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
+            <div className="bg-white dark:bg-[#1A1816] rounded-2xl max-w-lg w-full border border-[#E8E0D8] dark:border-[#2E2A26] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-[#EFE8E0] dark:border-[#2A2622] flex items-start justify-between gap-3 bg-[#FAF7F4] dark:bg-[#161412]">
+                <div className="flex items-center gap-3 min-w-0">
+                  {liveModalProd.image && (
+                    <img
+                      src={liveModalProd.image}
+                      alt={liveModalProd.name}
+                      referrerPolicy="no-referrer"
+                      className="w-14 h-14 rounded-xl object-cover border border-[#E8E0D8] dark:border-[#2E2A26] shrink-0"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#7D6E65] dark:text-[#A89E96]">
+                      <span className="text-[#141414] dark:text-[#F3E1DF]">{articleLabel}</span> ·{' '}
+                      <span>{liveModalProd.category}</span>
+                    </div>
+                    <h3 className="font-editorial text-lg font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
+                      {liveModalProd.name}
+                    </h3>
+                    <div className="flex items-center gap-3 mt-0.5 text-xs">
+                      <span className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB]">
+                        {storeProfile.currency} {liveModalProd.retailPrice.toLocaleString()} / {liveModalProd.unit}
+                      </span>
+                      <span className="text-[#7D6E65] dark:text-[#A89E96] font-mono-numbers">
+                        · {totalAvailableNow} {liveModalProd.unit} in stock
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <h3 className="font-editorial text-lg font-semibold text-[#141414] dark:text-[#F6F1EB] mt-0.5">
-                  {variantModalProduct.name}
-                </h3>
-                <div className="flex items-baseline justify-between mt-2">
-                  <span className="font-mono-numbers text-xl font-bold text-[#141414] dark:text-[#F6F1EB]">
-                    {storeProfile.currency} {variantModalProduct.retailPrice.toLocaleString()}
-                  </span>
-                  <span className="text-xs text-[#6B625C] dark:text-[#A89E96] font-mono-numbers">
-                    {variantModalProduct.stockQuantity} {variantModalProduct.unit} available
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setVariantModalProduct(null)}
+                  className="p-1.5 rounded-lg text-[#7D6E65] hover:text-[#141414] dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {variantModalProduct.colorVariants && variantModalProduct.colorVariants.length > 0 && (
-                <div className="space-y-1.5">
-                  <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">
-                    Colorway: <span className="font-normal text-[#6B625C] dark:text-[#A89E96]">{modalColor}</span>
+              {/* Body */}
+              <div className="p-5 overflow-y-auto space-y-4">
+                {modalError && (
+                  <div className="p-3 rounded-xl bg-[#F3E1DF] dark:bg-[#3A2322] border border-[#E5C6C3] dark:border-[#5C3A38] text-xs font-medium text-[#8A2626] dark:text-[#FCA5A5] flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{modalError}</span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {variantModalProduct.colorVariants.map((cv) => {
-                      const out = cv.inStock === false || cv.stock <= 0;
-                      const chosen = modalColor === cv.color;
-                      return (
+                )}
+
+                {hasColorVariants ? (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">
+                        Select Available Colors & Quantities
+                      </div>
+                      <span className="text-[11px] font-mono-numbers text-[#7D6E65] dark:text-[#A89E96]">
+                        {availableVariants.length} color{availableVariants.length === 1 ? '' : 's'} available
+                      </span>
+                    </div>
+
+                    {availableVariants.length === 0 ? (
+                      <div className="p-6 rounded-xl bg-[#FAF7F4] dark:bg-[#221F1C] border border-[#E8E0D8] dark:border-[#2E2A26] text-center space-y-1">
+                        <div className="text-sm font-semibold text-[#9B2C2C] dark:text-[#FCA5A5]">
+                          No Available Colors Left
+                        </div>
+                        <p className="text-xs text-[#7D6E65] dark:text-[#A89E96]">
+                          All colors for {articleLabel} are currently out of stock or already in your shopping bag. Restock in Inventory to sell again.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-[#EFE8E0] dark:divide-[#2A2622] border border-[#E8E0D8] dark:border-[#2E2A26] rounded-xl overflow-hidden">
+                        {availableVariants.map((cv) => {
+                          const maxForColor = getRemainingColorStock(liveModalProd.id, cv.color);
+                          const currentQty = Math.max(0, Number(modalColorQtys[cv.color]) || 0);
+                          return (
+                            <div
+                              key={cv.color}
+                              className={`px-3.5 py-2.5 flex items-center justify-between gap-3 transition-colors ${
+                                currentQty > 0
+                                  ? 'bg-[#FAF7F4] dark:bg-[#24201C]'
+                                  : 'bg-white dark:bg-[#1A1816]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span
+                                  className="w-5 h-5 rounded-full border border-black/20 dark:border-white/25 shrink-0"
+                                  style={{ backgroundColor: cv.hex || '#C9B8A8' }}
+                                />
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB] truncate">
+                                    {cv.color}
+                                  </div>
+                                  <div className="text-[11px] font-mono-numbers text-[#7D6E65] dark:text-[#A89E96]">
+                                    {maxForColor} {liveModalProd.unit} available
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="inline-flex items-center rounded-lg border border-[#E8E0D8] dark:border-[#2E2A26] bg-white dark:bg-[#121110]">
+                                <button
+                                  type="button"
+                                  disabled={currentQty <= 0}
+                                  onClick={() =>
+                                    setColorQtySafe(cv.color, currentQty - 1, maxForColor)
+                                  }
+                                  className="px-2.5 py-1.5 text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] rounded-l-lg disabled:opacity-35 cursor-pointer"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={maxForColor}
+                                  value={currentQty}
+                                  onChange={(e) => {
+                                    const parsed = parseInt(e.target.value, 10);
+                                    setColorQtySafe(
+                                      cv.color,
+                                      Number.isNaN(parsed) ? 0 : parsed,
+                                      maxForColor
+                                    );
+                                  }}
+                                  className="w-11 text-center text-xs font-mono-numbers font-bold bg-transparent text-[#141414] dark:text-[#F6F1EB] focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setColorQtySafe(cv.color, currentQty + 1, maxForColor)
+                                  }
+                                  className={`px-2.5 py-1.5 rounded-r-lg transition-colors ${
+                                    currentQty >= maxForColor
+                                      ? 'text-[#B5A99F] opacity-45 cursor-not-allowed'
+                                      : 'text-[#4A433E] dark:text-[#E8E0D8] hover:bg-[#F6F1EB] dark:hover:bg-[#24201C] cursor-pointer'
+                                  }`}
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {(liveModalProd.options?.sizes?.length || 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">Size / Cut</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {liveModalProd.options!.sizes!.map((sz) => (
                         <button
-                          key={cv.color}
+                          key={sz}
                           type="button"
-                          disabled={out}
-                          onClick={() => setModalColor(cv.color)}
-                          className={`px-2.5 py-1.5 rounded-xl border text-xs font-medium inline-flex items-center gap-1.5 transition-colors ${
-                            out
-                              ? 'bg-[#F3E1DF]/50 text-[#9B2C2C] border-[#E5C6C3] line-through opacity-60 cursor-not-allowed'
-                              : chosen
+                          onClick={() => setModalSize(sz)}
+                          className={`px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-colors ${
+                            modalSize === sz
                               ? 'bg-[#141414] text-white border-[#141414] dark:bg-[#F6F1EB] dark:text-[#141414]'
-                              : 'bg-[#FAF7F4] dark:bg-[#221F1C] text-[#141414] dark:text-[#F6F1EB] border-[#E8E0D8] dark:border-[#2E2A26] cursor-pointer'
+                              : 'bg-[#FAF7F4] dark:bg-[#221F1C] text-[#4A433E] dark:text-[#C9BFB6] border-[#E8E0D8] dark:border-[#2E2A26]'
                           }`}
                         >
-                          <span
-                            className="w-3 h-3 rounded-full border border-black/15"
-                            style={{ backgroundColor: cv.hex || '#C9B8A8' }}
-                          />
-                          <span>{cv.color}</span>
-                          {chosen && <Check className="w-3 h-3" />}
+                          {sz}
                         </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky Footer with Live Selection Summary */}
+              <div className="px-5 py-4 border-t border-[#EFE8E0] dark:border-[#2A2622] bg-[#FAF7F4] dark:bg-[#161412] space-y-3">
+                {hasColorVariants && selectedEntries.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <div className="text-[#4A433E] dark:text-[#C9BFB6] truncate">
+                      {selectedEntries.map((s) => `${s.color} × ${s.quantity}`).join(' · ')}
+                    </div>
+                    <div className="font-mono-numbers font-bold text-[#141414] dark:text-[#F6F1EB] shrink-0">
+                      {storeProfile.currency} {totalSelectedSubtotal.toLocaleString()}
+                    </div>
+                  </div>
+                )}
+
+                {hasColorVariants ? (
+                  <button
+                    type="button"
+                    disabled={totalSelectedUnits <= 0}
+                    onClick={() => {
+                      const res = addMultipleColorsToCart(
+                        liveModalProd,
+                        selectedEntries.map((s) => ({
+                          color: s.color,
+                          quantity: s.quantity,
+                          size: modalSize,
+                        }))
                       );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {(variantModalProduct.options?.sizes?.length || 0) > 0 && (
-                <div className="space-y-1.5">
-                  <div className="text-xs font-semibold text-[#141414] dark:text-[#F6F1EB]">Size</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {variantModalProduct.options!.sizes!.map((sz) => (
-                      <button
-                        key={sz}
-                        type="button"
-                        onClick={() => setModalSize(sz)}
-                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-colors ${
-                          modalSize === sz
-                            ? 'bg-[#141414] text-white border-[#141414] dark:bg-[#F6F1EB] dark:text-[#141414]'
-                            : 'bg-[#FAF7F4] dark:bg-[#221F1C] text-[#4A433E] dark:text-[#C9BFB6] border-[#E8E0D8] dark:border-[#2E2A26]'
-                        }`}
-                      >
-                        {sz}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  addToCart(variantModalProduct, 1, {
-                    selectedColor: modalColor,
-                    selectedSize: modalSize,
-                  });
-                  setCardVariantSelections((prev) => ({
-                    ...prev,
-                    [variantModalProduct.id]: { color: modalColor, size: modalSize },
-                  }));
-                  showToast(`Added ${variantModalProduct.name} to bag.`, 'success');
-                  setVariantModalProduct(null);
-                }}
-                className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:text-[#141414] text-white text-xs font-semibold cursor-pointer"
-              >
-                Add to Shopping Bag
-              </button>
+                      if (!res.ok) {
+                        setModalError(res.error || 'Could not add selected colors.');
+                        return;
+                      }
+                      showToast(
+                        `Added ${totalSelectedUnits} ${liveModalProd.unit}${totalSelectedUnits === 1 ? '' : 's'} of ${articleLabel} to cart.`,
+                        'success'
+                      );
+                      setVariantModalProduct(null);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:hover:bg-[#E8E0D8] text-white dark:text-[#141414] text-xs font-semibold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {totalSelectedUnits > 0
+                      ? `Add ${totalSelectedUnits} ${liveModalProd.unit}${totalSelectedUnits === 1 ? '' : 's'} to Cart · ${storeProfile.currency} ${totalSelectedSubtotal.toLocaleString()}`
+                      : 'Select Color Quantities to Add'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={totalAvailableNow <= 0}
+                    onClick={() => {
+                      const res = addToCart(liveModalProd, 1, {
+                        selectedColor: modalColor,
+                        selectedSize: modalSize,
+                      });
+                      if (!res.ok) {
+                        setModalError(res.error || 'Out of stock.');
+                        return;
+                      }
+                      showToast(`Added ${liveModalProd.name} to cart.`, 'success');
+                      setVariantModalProduct(null);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#141414] hover:bg-[#2B2724] dark:bg-[#F6F1EB] dark:text-[#141414] text-white text-xs font-semibold cursor-pointer disabled:opacity-40"
+                  >
+                    {totalAvailableNow > 0 ? 'Add to Cart' : 'Out of Stock'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

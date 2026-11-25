@@ -3,6 +3,7 @@ import { usePos } from '../../context/PosContext';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
 import { Product, BusinessVertical, StockBackupRecord } from '../../types';
 import { PRODUCT_PRESET_IMAGES } from '../../lib/productThumbnails';
+import { ArticleColorDashboard } from './ArticleColorDashboard';
 import {
   Package,
   TrendingUp,
@@ -54,10 +55,12 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
     restoreStockBackup,
   } = usePos();
 
+  const [stockViewTab, setStockViewTab] = useState<'article_color' | 'valuation'>('article_color');
   const [search, setSearch] = useState('');
   const [stockFilter, setStockFilter] = useState<'all' | 'out' | 'low' | 'healthy'>('all');
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [stockBanner, setStockBanner] = useState<string | null>(null);
 
   // New Stock Modal State with Image, Color, Size & Dual Unit (Pack/Coil + Loose Meter)
   const [isAddStockOpen, setIsAddStockOpen] = useState(false);
@@ -162,7 +165,7 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
       setSelectedBackupForAudit(backup);
       setShowBackupVault(true);
     } catch (err: any) {
-      alert(`AI Daily Backup failed: ${err.message || 'Check connection'}`);
+      setStockBanner(`AI Daily Backup failed: ${err.message || 'Check connection'}`);
     } finally {
       setIsBackingUp(false);
     }
@@ -212,9 +215,9 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
       const content = event.target?.result as string;
       const success = restoreStockBackup(content);
       if (success) {
-        alert('Stock backup successfully restored from file!');
+        setStockBanner('Stock backup successfully restored from file.');
       } else {
-        alert('Failed to restore backup file. Invalid format or missing product catalog.');
+        setStockBanner('Failed to restore backup file. Invalid format or missing product catalog.');
       }
     };
     reader.readAsText(file);
@@ -314,6 +317,51 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
         </div>
       </div>
 
+      {/* View Switcher: Article & Color Stock Control vs Stock Valuation & Dual-Unit */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+        <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80">
+          <button
+            type="button"
+            onClick={() => setStockViewTab('article_color')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              stockViewTab === 'article_color'
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            Article &amp; Color Stock Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => setStockViewTab('valuation')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              stockViewTab === 'valuation'
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            Stock Valuation &amp; Dual-Unit Table
+          </button>
+        </div>
+
+        {stockBanner && (
+          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+            <span>{stockBanner}</span>
+            <button
+              type="button"
+              onClick={() => setStockBanner(null)}
+              className="underline cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        )}
+      </div>
+
+      {stockViewTab === 'article_color' ? (
+        <ArticleColorDashboard lowColorThreshold={2} />
+      ) : (
+        <>
       {/* Stock Valuation KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -612,6 +660,8 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
           </table>
         </div>
       </div>
+        </>
+      )}
 
       {/* Hidden File Input for Restoring External JSON Backup */}
       <input
@@ -797,10 +847,9 @@ export const StockManager: React.FC<{ onOpenAiIngest: () => void }> = ({ onOpenA
 
                           <button
                             onClick={() => {
-                              if (confirm(`Restore stock catalog to snapshot from ${b.date}? Current products will be updated.`)) {
-                                restoreStockBackup(b.id);
-                                alert('Stock catalog successfully restored!');
-                              }
+                              restoreStockBackup(b.id);
+                              setStockBanner(`Stock catalog restored to snapshot from ${b.date}.`);
+                              setShowBackupVault(false);
                             }}
                             className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold flex items-center space-x-1 transition-colors shadow-xs"
                             title="Restore product catalog to this snapshot state"

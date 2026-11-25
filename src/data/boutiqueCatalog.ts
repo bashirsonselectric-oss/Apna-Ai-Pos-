@@ -141,9 +141,64 @@ export const BOUTIQUE_COUPONS: BoutiqueCoupon[] = [
   },
 ];
 
+export const STANDARD_ARTICLE_COLORS: { color: string; hex: string }[] = [
+  { color: 'Red', hex: '#DC2626' },
+  { color: 'Black', hex: '#141414' },
+  { color: 'White', hex: '#F8FAFC' },
+  { color: 'Yellow', hex: '#EAB308' },
+  { color: 'Pink', hex: '#EC4899' },
+  { color: 'Green', hex: '#16A34A' },
+  { color: 'Skin', hex: '#E6C3A5' },
+  { color: 'Blue', hex: '#2563EB' },
+  { color: 'T-Pink', hex: '#F472B6' },
+  { color: 'Orange', hex: '#F97316' },
+];
+
 export const BOUTIQUE_FEATURED_PRODUCTS: Product[] = [
   {
+    id: 'btq-art-01',
+    articleNumber: 'Article 1',
+    name: 'Royal Embroidered Lawn 3-Piece Suit',
+    urduName: 'آرٹیکل 1 — رائل ایمبرائیڈرڈ لان 3 پیس سوٹ',
+    barcode: 'ART-001',
+    category: "Women's Clothing",
+    vertical: 'clothing_apparel',
+    costPrice: 3200,
+    retailPrice: 4800,
+    stockQuantity: 20,
+    minStockAlert: 4,
+    unit: 'suit',
+    taxPercent: 0,
+    image: imgWomensDress,
+    color: 'Red',
+    size: 'Unstitched 3-Pc',
+    options: {
+      colors: ['Red', 'Black', 'White', 'Yellow', 'Pink', 'Green', 'Skin', 'Blue', 'T-Pink', 'Orange'],
+      sizes: ['Unstitched 3-Pc', 'S', 'M', 'L', 'XL'],
+    },
+    colorVariants: [
+      { color: 'Red', hex: '#DC2626', stock: 2, inStock: true },
+      { color: 'Black', hex: '#141414', stock: 2, inStock: true },
+      { color: 'White', hex: '#F8FAFC', stock: 2, inStock: true },
+      { color: 'Yellow', hex: '#EAB308', stock: 2, inStock: true },
+      { color: 'Pink', hex: '#EC4899', stock: 2, inStock: true },
+      { color: 'Green', hex: '#16A34A', stock: 2, inStock: true },
+      { color: 'Skin', hex: '#E6C3A5', stock: 2, inStock: true },
+      { color: 'Blue', hex: '#2563EB', stock: 2, inStock: true },
+      { color: 'T-Pink', hex: '#F472B6', stock: 2, inStock: true },
+      { color: 'Orange', hex: '#F97316', stock: 2, inStock: true },
+    ],
+    verticalAttributes: {
+      articleNumber: 'Article 1',
+      brand: 'Maison Élan',
+      collection: 'Signature 10-Color Set',
+      fabric: 'Premium Swiss Lawn',
+    },
+    lastUpdated: '2026-11-25',
+  },
+  {
     id: 'btq-w-01',
+    articleNumber: 'Article 2',
     name: 'Aurelia Pure Silk Midi Wrap Dress',
     urduName: 'اوریلیا پیور سلک مڈی ریپ ڈریس',
     barcode: 'FB-WMN-1001',
@@ -173,6 +228,7 @@ export const BOUTIQUE_FEATURED_PRODUCTS: Product[] = [
   },
   {
     id: 'btq-w-02',
+    articleNumber: 'Article 3',
     name: 'Celine Draped Cashmere Trench Coat',
     urduName: 'سیلین کیشمیئر ٹرینچ کوٹ',
     barcode: 'FB-WMN-1002',
@@ -201,6 +257,7 @@ export const BOUTIQUE_FEATURED_PRODUCTS: Product[] = [
   },
   {
     id: 'btq-m-01',
+    articleNumber: 'Article 4',
     name: 'Savile Tailored Charcoal Wool Blazer',
     urduName: 'سیول ٹیلرڈ چارکول وول بلیزر',
     barcode: 'FB-MEN-2001',
@@ -230,6 +287,7 @@ export const BOUTIQUE_FEATURED_PRODUCTS: Product[] = [
   },
   {
     id: 'btq-m-02',
+    articleNumber: 'Article 5',
     name: 'Crisp Egyptian Cotton Atelier Shirt',
     urduName: 'مصری کاٹن ایٹیلیئر شرٹ',
     barcode: 'FB-MEN-2002',
@@ -258,6 +316,7 @@ export const BOUTIQUE_FEATURED_PRODUCTS: Product[] = [
   },
   {
     id: 'btq-k-01',
+    articleNumber: 'Article 6',
     name: 'Little Mabel Organic Knit Cardigan Set',
     urduName: 'لٹل میبل آرگینک کاٹن کارڈیگن سیٹ',
     barcode: 'FB-KID-3001',

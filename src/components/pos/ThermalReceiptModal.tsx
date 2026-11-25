@@ -483,6 +483,11 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
                     <div key={idx} className="flex justify-between items-center py-1 gap-2">
                       <div className="truncate flex-1">
                         <span className="font-medium text-slate-800">{item.name}</span>
+                        {(item.articleNumber || item.color || item.size) && (
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {[item.articleNumber, item.color, item.size].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
                       </div>
                       <span className="text-slate-500 font-mono text-center w-8 shrink-0">
                         ×{item.quantity}
@@ -644,7 +649,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
                   <tbody className="divide-y divide-slate-100">
                     {receipt.items.map((item, idx) => (
                       <tr key={idx}>
-                        <td className="p-2 font-medium text-slate-800">{item.name}</td>
+                        <td className="p-2 font-medium text-slate-800">
+                          <div>{item.name}</div>
+                          {(item.articleNumber || item.color || item.size) && (
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              {[item.articleNumber, item.color, item.size].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </td>
                         <td className="p-2 text-center font-mono">{item.quantity}</td>
                         <td className="p-2 text-right font-mono">{item.unitPrice}</td>
                         <td className="p-2 text-right font-mono font-bold">
@@ -719,7 +731,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ receip
               <div className="py-2 border-b border-dashed border-black space-y-1 text-[11px]">
                 {receipt.items.map((item, idx) => (
                   <div key={idx} className="flex justify-between">
-                    <span className="truncate w-3/5">{item.name}</span>
+                    <span className="truncate w-3/5">
+                      {item.name}
+                      {(item.articleNumber || item.color) && (
+                        <span className="block text-[9px] opacity-80">
+                          {[item.articleNumber, item.color].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </span>
                     <span className="text-center w-1/5">×{item.quantity}</span>
                     <span className="text-right w-1/5 font-bold">{item.subtotal}</span>
                   </div>

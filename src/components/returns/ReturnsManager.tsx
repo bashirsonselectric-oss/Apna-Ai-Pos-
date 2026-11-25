@@ -29,7 +29,7 @@ export const ReturnsManager: React.FC = () => {
   const [searchInvoice, setSearchInvoice] = useState('');
   const [selectedSale, setSelectedSale] = useState<SaleRecord | null>(null);
   const [selectedItems, setSelectedItems] = useState<{
-    [productId: string]: {
+    [lineKey: string]: {
       selected: boolean;
       returnQty: number;
       restock: boolean;
@@ -40,12 +40,17 @@ export const ReturnsManager: React.FC = () => {
   const [returnNotes, setReturnNotes] = useState('');
   const [processedReturnSlip, setProcessedReturnSlip] = useState<ReturnRecord | null>(null);
   const [historySearch, setHistorySearch] = useState('');
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const getLineKey = (productId: string, color: string | undefined, idx: number) =>
+    `${productId}::${color || 'default'}::${idx}`;
 
   // Check feature lock
   const isLocked = featureLocks.returnsRefunds;
 
   const handleSearchInvoice = (e: React.FormEvent) => {
     e.preventDefault();
+    setStatusError(null);
     if (!searchInvoice.trim()) return;
     const query = searchInvoice.trim().toLowerCase();
     const found = sales.find(
@@ -57,10 +62,9 @@ export const ReturnsManager: React.FC = () => {
 
     if (found) {
       setSelectedSale(found);
-      // Initialize selected items state
       const initialMap: typeof selectedItems = {};
-      found.items.forEach((item) => {
-        initialMap[item.productId] = {
+      found.items.forEach((item, idx) => {
+        initialMap[getLineKey(item.productId, item.color, idx)] = {
           selected: false,
           returnQty: 1,
           restock: true,
@@ -69,15 +73,15 @@ export const ReturnsManager: React.FC = () => {
       });
       setSelectedItems(initialMap);
     } else {
-      alert(`No sale found matching invoice #${searchInvoice}`);
+      setStatusError(`No sale found matching invoice #${searchInvoice}`);
     }
   };
 
   const calculateTotalRefund = () => {
     if (!selectedSale) return 0;
     let sum = 0;
-    selectedSale.items.forEach((item) => {
-      const state = selectedItems[item.productId];
+    selectedSale.items.forEach((item, idx) => {
+      const state = selectedItems[getLineKey(item.productId, item.color, idx)];
       if (state && state.selected) {
         sum += item.unitPrice * state.returnQty;
       }
@@ -87,14 +91,17 @@ export const ReturnsManager: React.FC = () => {
 
   const handleCompleteReturn = () => {
     if (!selectedSale) return;
+    setStatusError(null);
 
     const returnItems: ReturnItem[] = [];
-    selectedSale.items.forEach((item) => {
-      const state = selectedItems[item.productId];
+    selectedSale.items.forEach((item, idx) => {
+      const state = selectedItems[getLineKey(item.productId, item.color, idx)];
       if (state && state.selected && state.returnQty > 0) {
         returnItems.push({
           productId: item.productId,
+          articleNumber: item.articleNumber,
           name: item.name,
+          color: item.color,
           quantityReturned: state.returnQty,
           unitPrice: item.unitPrice,
           refundSubtotal: item.unitPrice * state.returnQty,
@@ -105,7 +112,7 @@ export const ReturnsManager: React.FC = () => {
     });
 
     if (returnItems.length === 0) {
-      alert('Please select at least one item to return.');
+      setStatusError('Please select at least one item to return.');
       return;
     }
 
@@ -262,21 +269,29 @@ export const ReturnsManager: React.FC = () => {
                 </button>
               </form>
 
+              {statusError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-700 dark:text-rose-300 flex items-center justify-center gap-2 max-w-md mx-auto">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{statusError}</span>
+                </div>
+              )}
+
               {/* Quick List of Recent Sales to pick from */}
               {sales.length > 0 && (
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-left">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Or select from recent sales:</span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {sales.slice(0, 4).map((s) => (
+                    {sales.filter((s) => s.status !== 'cancelled').slice(0, 6).map((s) => (
                       <button
                         key={s.id}
                         type="button"
                         onClick={() => {
+                          setStatusError(null);
                           setSearchInvoice(s.invoiceNo);
                           setSelectedSale(s);
                           const initialMap: typeof selectedItems = {};
-                          s.items.forEach((item) => {
-                            initialMap[item.productId] = {
+                          s.items.forEach((item, idx) => {
+                            initialMap[getLineKey(item.productId, item.color, idx)] = {
                               selected: false,
                               returnQty: 1,
                               restock: true,
@@ -289,7 +304,7 @@ export const ReturnsManager: React.FC = () => {
                       >
                         <div>
                           <div className="font-bold text-xs text-slate-800 dark:text-slate-200">{s.invoiceNo}</div>
-                          <div className="text-[11px] text-slate-500">{new Date(s.timestamp).toLocaleDateString()} • {s.items.length} items</div>
+                          <div className="text-[11px] text-slate-500">{new Date(s.timestamp).toLocaleDateString()} • {s.items.length} line(s)</div>
                         </div>
                         <div className="font-bold text-xs text-indigo-600 dark:text-indigo-400 font-mono-numbers">
                           Rs {s.grandTotal.toLocaleString()}
@@ -333,8 +348,9 @@ export const ReturnsManager: React.FC = () => {
               <div className="space-y-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Select Items to Return:</h3>
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                  {selectedSale.items.map((item) => {
-                    const itemState = selectedItems[item.productId] || {
+                  {selectedSale.items.map((item, idx) => {
+                    const lineKey = getLineKey(item.productId, item.color, idx);
+                    const itemState = selectedItems[lineKey] || {
                       selected: false,
                       returnQty: 1,
                       restock: true,
@@ -343,7 +359,7 @@ export const ReturnsManager: React.FC = () => {
 
                     return (
                       <div
-                        key={item.productId}
+                        key={lineKey}
                         className={`p-4 transition-colors ${
                           itemState.selected
                             ? 'bg-rose-50/50 dark:bg-rose-950/20'
@@ -358,7 +374,7 @@ export const ReturnsManager: React.FC = () => {
                               onChange={(e) =>
                                 setSelectedItems((prev) => ({
                                   ...prev,
-                                  [item.productId]: {
+                                  [lineKey]: {
                                     ...itemState,
                                     selected: e.target.checked,
                                   },
@@ -368,17 +384,18 @@ export const ReturnsManager: React.FC = () => {
                             />
                             <div>
                               <div className="font-bold text-sm text-slate-900 dark:text-white">
+                                {item.articleNumber ? `${item.articleNumber} · ` : ''}
                                 {item.name}
+                                {item.color ? ` (${item.color})` : ''}
                               </div>
                               <div className="text-xs text-slate-500 dark:text-slate-400">
-                                Purchased: {item.quantity} units @ Rs {item.unitPrice.toLocaleString()} each (Subtotal: Rs {item.subtotal.toLocaleString()})
+                                Purchased: {item.quantity} {item.unit} @ {storeProfile.currency} {item.unitPrice.toLocaleString()} each (Subtotal: {storeProfile.currency} {item.subtotal.toLocaleString()})
                               </div>
                             </div>
                           </label>
 
                           {itemState.selected && (
                             <div className="flex flex-wrap items-center gap-3 pl-7 sm:pl-0">
-                              {/* Quantity selector */}
                               <div className="flex items-center gap-1.5 text-xs">
                                 <span className="text-slate-500">Return Qty:</span>
                                 <input
@@ -390,7 +407,7 @@ export const ReturnsManager: React.FC = () => {
                                     const val = Math.min(item.quantity, Math.max(1, parseInt(e.target.value) || 1));
                                     setSelectedItems((prev) => ({
                                       ...prev,
-                                      [item.productId]: {
+                                      [lineKey]: {
                                         ...itemState,
                                         returnQty: val,
                                       },
@@ -400,7 +417,6 @@ export const ReturnsManager: React.FC = () => {
                                 />
                               </div>
 
-                              {/* Restock Toggle */}
                               <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
                                 <input
                                   type="checkbox"
@@ -408,7 +424,7 @@ export const ReturnsManager: React.FC = () => {
                                   onChange={(e) =>
                                     setSelectedItems((prev) => ({
                                       ...prev,
-                                      [item.productId]: {
+                                      [lineKey]: {
                                         ...itemState,
                                         restock: e.target.checked,
                                       },
@@ -416,16 +432,15 @@ export const ReturnsManager: React.FC = () => {
                                   }
                                   className="w-3.5 h-3.5 text-indigo-600 rounded-sm"
                                 />
-                                Restock Item
+                                Restore {item.color ? `${item.color} ` : ''}Stock
                               </label>
 
-                              {/* Reason */}
                               <select
                                 value={itemState.reason}
                                 onChange={(e) =>
                                   setSelectedItems((prev) => ({
                                     ...prev,
-                                    [item.productId]: {
+                                    [lineKey]: {
                                       ...itemState,
                                       reason: e.target.value as any,
                                     },
@@ -440,9 +455,8 @@ export const ReturnsManager: React.FC = () => {
                                 <option value="other">Other</option>
                               </select>
 
-                              {/* Item Refund Subtotal */}
                               <div className="font-bold text-xs text-rose-600 dark:text-rose-400 font-mono-numbers">
-                                -Rs {(item.unitPrice * itemState.returnQty).toLocaleString()}
+                                -{storeProfile.currency} {(item.unitPrice * itemState.returnQty).toLocaleString()}
                               </div>
                             </div>
                           )}
@@ -550,7 +564,12 @@ export const ReturnsManager: React.FC = () => {
                       {new Date(ret.date).toLocaleString()} • Processed by: {ret.processedBy} {ret.customerName ? `• Customer: ${ret.customerName}` : ''}
                     </div>
                     <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                      {ret.items.map((i) => `${i.quantityReturned}x ${i.name} (${i.reason})`).join(', ')}
+                      {ret.items
+                        .map(
+                          (i) =>
+                            `${i.quantityReturned}x ${i.articleNumber ? `${i.articleNumber} ` : ''}${i.name}${i.color ? ` (${i.color})` : ''} (${i.reason})`
+                        )
+                        .join(', ')}
                     </div>
                   </div>
 

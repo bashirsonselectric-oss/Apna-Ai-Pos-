@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePos } from '../../context/PosContext';
 import { Product, BusinessVertical } from '../../types';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
+import { STANDARD_ARTICLE_COLORS } from '../../data/boutiqueCatalog';
 import { PRODUCT_PRESET_IMAGES } from '../../lib/productThumbnails';
 import {
   Package,
@@ -54,11 +55,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
   // Filtering
   const displayedProducts = filteredProducts.filter((p) => {
     const query = search.toLowerCase().trim();
+    const colorText = (p.colorVariants || []).map((c) => c.color).join(' ').toLowerCase();
     const matchesSearch =
       !query ||
+      (p.articleNumber && p.articleNumber.toLowerCase().includes(query)) ||
       p.name.toLowerCase().includes(query) ||
-      p.barcode.includes(query) ||
+      p.barcode.toLowerCase().includes(query) ||
       p.category.toLowerCase().includes(query) ||
+      colorText.includes(query) ||
       (p.color && p.color.toLowerCase().includes(query)) ||
       (p.size && p.size.toLowerCase().includes(query)) ||
       (p.subSize && p.subSize.toLowerCase().includes(query)) ||
@@ -72,9 +76,14 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
   });
 
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [customColorName, setCustomColorName] = useState('');
+  const [customColorHex, setCustomColorHex] = useState('#2563EB');
+  const [customColorQty, setCustomColorQty] = useState(2);
 
   // Modal Form State for Add / Edit
   const [formState, setFormState] = useState<{
+    articleNumber: string;
     name: string;
     urduName: string;
     barcode: string;
@@ -101,6 +110,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
     }[];
     verticalAttributes: Record<string, any>;
   }>({
+    articleNumber: '',
     name: '',
     urduName: '',
     barcode: '',
@@ -123,66 +133,97 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
     verticalAttributes: {},
   });
 
+  // Helper to update colorVariants AND auto-calculate total stockQuantity
+  const setColorVariantsWithAutoTotal = (
+    nextVariants: { color: string; hex?: string; stock: number; inStock?: boolean }[]
+  ) => {
+    const normalized = nextVariants.map((cv) => {
+      const safeStock = Math.max(0, Math.floor(Number(cv.stock) || 0));
+      return {
+        ...cv,
+        stock: safeStock,
+        inStock: safeStock > 0,
+      };
+    });
+    const autoTotal = normalized.reduce((sum, cv) => sum + cv.stock, 0);
+    setFormState((prev) => ({
+      ...prev,
+      colorVariants: normalized,
+      stockQuantity: normalized.length > 0 ? autoTotal : prev.stockQuantity,
+      color: normalized.find((c) => c.stock > 0)?.color || normalized[0]?.color || prev.color,
+      options: {
+        ...prev.options,
+        colors: normalized.map((c) => c.color),
+      },
+    }));
+  };
+
   const openNewModal = () => {
     const isGarmentOrFabric = activeVertical === 'clothing_apparel';
+    const nextArticleNum = `Article ${products.length + 1}`;
     const defaultColorVariants = isGarmentOrFabric
-      ? [
-          { color: 'Navy Blue', hex: '#1e3a8a', stock: 10, inStock: true },
-          { color: 'Jet Black', hex: '#09090b', stock: 8, inStock: true },
-          { color: 'Off White', hex: '#f8fafc', stock: 6, inStock: true },
-          { color: 'Slate Grey', hex: '#64748b', stock: 5, inStock: true },
-          { color: 'Camel Brown', hex: '#b45309', stock: 4, inStock: true },
-          { color: 'Olive Green', hex: '#3f6212', stock: 3, inStock: true },
-          { color: 'Ruby Red', hex: '#dc2626', stock: 2, inStock: true },
-          { color: 'Royal Blue', hex: '#2563eb', stock: 0, inStock: false }, // Out of stock design highlight
-        ]
+      ? STANDARD_ARTICLE_COLORS.map((c) => ({
+          color: c.color,
+          hex: c.hex,
+          stock: 2,
+          inStock: true,
+        }))
       : [
-          { color: 'Red', hex: '#ef4444', stock: 15, inStock: true },
-          { color: 'Black', hex: '#0f172a', stock: 12, inStock: true },
-          { color: 'Blue', hex: '#2563eb', stock: 8, inStock: true },
-          { color: 'Yellow', hex: '#eab308', stock: 5, inStock: true },
-          { color: 'Green', hex: '#16a34a', stock: 4, inStock: true },
-          { color: 'White', hex: '#f8fafc', stock: 0, inStock: false }, // Out of stock
-          { color: 'Grey', hex: '#94a3b8', stock: 0, inStock: false }, // Out of stock
+          { color: 'Red', hex: '#ef4444', stock: 10, inStock: true },
+          { color: 'Black', hex: '#0f172a', stock: 8, inStock: true },
+          { color: 'Blue', hex: '#2563eb', stock: 6, inStock: true },
+          { color: 'Yellow', hex: '#eab308', stock: 4, inStock: true },
+          { color: 'Green', hex: '#16a34a', stock: 2, inStock: true },
         ];
+    const autoTotal = defaultColorVariants.reduce((sum, cv) => sum + cv.stock, 0);
 
     setFormState({
+      articleNumber: nextArticleNum,
       name: '',
       urduName: '',
-      barcode: `${Math.floor(896000000000 + Math.random() * 9000000000)}`,
-      category: isGarmentOrFabric ? 'Fabrics & Suits' : 'General',
-      costPrice: 0,
-      retailPrice: 0,
-      stockQuantity: 10,
-      minStockAlert: 5,
+      barcode: `ART-${String(products.length + 1).padStart(3, '0')}`,
+      category: isGarmentOrFabric ? "Women's Clothing" : 'General',
+      costPrice: 3000,
+      retailPrice: 4800,
+      stockQuantity: autoTotal,
+      minStockAlert: 4,
       unit: isGarmentOrFabric ? 'suit' : (verticalConfig.unitOptions[0] || 'pcs'),
       image: isGarmentOrFabric
         ? PRODUCT_PRESET_IMAGES.fabricSuit
         : PRODUCT_PRESET_IMAGES.cableRed,
-      color: isGarmentOrFabric ? 'Navy Blue' : 'Red',
-      size: isGarmentOrFabric ? 'L' : '3/29',
-      subSize: isGarmentOrFabric ? '4.5m Unstitched' : 'Single Core',
+      color: defaultColorVariants[0]?.color || 'Red',
+      size: isGarmentOrFabric ? 'Unstitched 3-Pc' : '3/29',
+      subSize: isGarmentOrFabric ? 'Unstitched Suit' : 'Single Core',
       options: {
         colors: defaultColorVariants.map((c) => c.color),
-        sizes: isGarmentOrFabric ? ['S', 'M', 'L', 'XL', 'XXL', '4.5m (Suit)'] : ['3/29', '7/29', '7/36'],
+        sizes: isGarmentOrFabric ? ['Unstitched 3-Pc', 'S', 'M', 'L', 'XL'] : ['3/29', '7/29', '7/36'],
         subSizes: isGarmentOrFabric ? ['Unstitched Fabric', 'Stitched Suit', 'Single Piece'] : ['Single Core', 'Double Core'],
       },
       colorVariants: defaultColorVariants,
-      verticalAttributes: {},
+      verticalAttributes: { articleNumber: nextArticleNum },
     });
+    setCustomColorName('');
+    setCustomColorQty(2);
     setIsNewModalOpen(true);
   };
 
   const openEditModal = (product: Product) => {
     setEditProductModal(product);
+    const existingVariants = product.colorVariants ? [...product.colorVariants] : [];
+    const autoTotal =
+      existingVariants.length > 0
+        ? existingVariants.reduce((sum, cv) => sum + Math.max(0, Number(cv.stock) || 0), 0)
+        : product.stockQuantity ?? 0;
+
     setFormState({
+      articleNumber: product.articleNumber || product.verticalAttributes?.articleNumber || '',
       name: product.name ?? '',
       urduName: product.urduName ?? '',
       barcode: product.barcode ?? '',
       category: product.category ?? 'General',
       costPrice: product.costPrice ?? 0,
       retailPrice: product.retailPrice ?? 0,
-      stockQuantity: product.stockQuantity ?? 0,
+      stockQuantity: autoTotal,
       minStockAlert: product.minStockAlert ?? 5,
       unit: product.unit ?? (verticalConfig.unitOptions[0] || 'pcs'),
       image: product.image ?? '',
@@ -190,37 +231,62 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
       size: product.size ?? '',
       subSize: product.subSize ?? '',
       options: product.options ?? { colors: [], sizes: [], subSizes: [] },
-      colorVariants: product.colorVariants ? [...product.colorVariants] : [],
+      colorVariants: existingVariants,
       verticalAttributes: { ...(product.verticalAttributes || {}) },
     });
+    setCustomColorName('');
+    setCustomColorQty(2);
   };
 
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formState.name.trim()) return;
 
+    const normalizedVariants = (formState.colorVariants || []).map((cv) => {
+      const safeStock = Math.max(0, Math.floor(Number(cv.stock) || 0));
+      return {
+        ...cv,
+        stock: safeStock,
+        inStock: safeStock > 0,
+      };
+    });
+    const computedStock =
+      normalizedVariants.length > 0
+        ? normalizedVariants.reduce((sum, cv) => sum + cv.stock, 0)
+        : Math.max(0, Math.floor(Number(formState.stockQuantity) || 0));
+    const cleanArticleNo =
+      formState.articleNumber.trim() || `Article ${products.length + 1}`;
+
     if (editProductModal) {
       updateProduct(editProductModal.id, {
+        articleNumber: cleanArticleNo,
         name: formState.name,
         urduName: formState.urduName,
         barcode: formState.barcode,
         category: formState.category,
         costPrice: Number(formState.costPrice),
         retailPrice: Number(formState.retailPrice),
-        stockQuantity: Number(formState.stockQuantity),
+        stockQuantity: computedStock,
         minStockAlert: Number(formState.minStockAlert),
         unit: formState.unit,
         image: formState.image,
-        color: formState.color,
+        color: normalizedVariants.find((c) => c.stock > 0)?.color || formState.color,
         size: formState.size,
         subSize: formState.subSize,
-        options: formState.options,
-        colorVariants: formState.colorVariants,
-        verticalAttributes: formState.verticalAttributes,
+        options: {
+          ...formState.options,
+          colors: normalizedVariants.length > 0 ? normalizedVariants.map((c) => c.color) : formState.options?.colors,
+        },
+        colorVariants: normalizedVariants,
+        verticalAttributes: {
+          ...formState.verticalAttributes,
+          articleNumber: cleanArticleNo,
+        },
       });
       setEditProductModal(null);
     } else {
       addProduct({
+        articleNumber: cleanArticleNo,
         name: formState.name,
         urduName: formState.urduName,
         barcode: formState.barcode,
@@ -228,17 +294,23 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
         vertical: activeVertical,
         costPrice: Number(formState.costPrice),
         retailPrice: Number(formState.retailPrice),
-        stockQuantity: Number(formState.stockQuantity),
+        stockQuantity: computedStock,
         minStockAlert: Number(formState.minStockAlert),
         unit: formState.unit,
         taxPercent: 0,
         image: formState.image,
-        color: formState.color,
+        color: normalizedVariants.find((c) => c.stock > 0)?.color || formState.color,
         size: formState.size,
         subSize: formState.subSize,
-        options: formState.options,
-        colorVariants: formState.colorVariants,
-        verticalAttributes: formState.verticalAttributes,
+        options: {
+          ...formState.options,
+          colors: normalizedVariants.length > 0 ? normalizedVariants.map((c) => c.color) : formState.options?.colors,
+        },
+        colorVariants: normalizedVariants,
+        verticalAttributes: {
+          ...formState.verticalAttributes,
+          articleNumber: cleanArticleNo,
+        },
       });
       setIsNewModalOpen(false);
     }
@@ -358,75 +430,46 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
                             </div>
                           )}
                           <div className="min-w-0">
-                            <div className="font-bold text-slate-900 truncate max-w-xs">{p.name}</div>
-                            {/* Visual Badges: Color Swatch, Size, Sub-size */}
-                            <div className="flex items-center flex-wrap gap-1 mt-1">
-                              {p.color && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                                  <span
-                                    className="w-2 h-2 rounded-full border border-black/20"
-                                    style={{
-                                      backgroundColor:
-                                        p.color.toLowerCase() === 'white'
-                                          ? '#ffffff'
-                                          : p.color.toLowerCase() === 'red'
-                                          ? '#ef4444'
-                                          : p.color.toLowerCase() === 'black'
-                                          ? '#18181b'
-                                          : p.color.toLowerCase() === 'blue'
-                                          ? '#3b82f6'
-                                          : p.color.toLowerCase() === 'yellow'
-                                          ? '#eab308'
-                                          : p.color.toLowerCase() === 'green'
-                                          ? '#22c55e'
-                                          : p.color.toLowerCase() === 'copper'
-                                          ? '#b45309'
-                                          : '#94a3b8',
-                                    }}
-                                  />
-                                  <span>{p.color}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {(p.articleNumber || p.verticalAttributes?.articleNumber) && (
+                                <span className="text-[11px] font-bold text-[#7A4A47] uppercase tracking-wide">
+                                  {p.articleNumber || p.verticalAttributes?.articleNumber} ·
                                 </span>
                               )}
-                              {p.size && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                  Size: {p.size}
-                                </span>
-                              )}
-                              {p.subSize && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-100">
-                                  Sub: {p.subSize}
-                                </span>
-                              )}
+                              <span className="font-bold text-slate-900 truncate max-w-xs">
+                                {p.name}
+                              </span>
                             </div>
 
-                            {/* 1-Set Multi-Color Bundle Preview */}
+                            {/* Color-Wise Stock Breakdown (Admin sees ALL colors including Out-of-Stock) */}
                             {p.colorVariants && p.colorVariants.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
-                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                                  1 Set ({p.colorVariants.length} Colors):
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                <span className="text-[10px] font-bold text-slate-500">
+                                  {p.colorVariants.length} Colors ({p.colorVariants.filter((c) => c.stock > 0 && c.inStock !== false).length} avail):
                                 </span>
-                                {p.colorVariants.map((cv, idx) => (
-                                  <span
-                                    key={idx}
-                                    title={`${cv.color}: ${cv.inStock !== false ? `${cv.stock} in stock` : 'Out of Stock'}`}
-                                    className={`inline-flex items-center gap-1 text-[9px] px-1.5 py-0.2 rounded-md font-bold border transition-all ${
-                                      cv.inStock === false
-                                        ? 'bg-rose-50 text-rose-700 border-rose-300 line-through'
-                                        : 'bg-slate-50 text-slate-700 border-slate-200'
-                                    }`}
-                                  >
+                                {p.colorVariants.map((cv, idx) => {
+                                  const isColorOut = cv.inStock === false || cv.stock <= 0;
+                                  return (
                                     <span
-                                      className="w-2 h-2 rounded-full border border-black/20 shrink-0"
-                                      style={{ backgroundColor: cv.hex || '#64748b' }}
-                                    />
-                                    <span>{cv.color}</span>
-                                    {cv.inStock === false && (
-                                      <span className="text-[8px] bg-rose-600 text-white px-1 rounded no-underline">
-                                        0
+                                      key={idx}
+                                      title={`${cv.color}: ${isColorOut ? 'Out of Stock (Hidden in POS)' : `${cv.stock} in stock`}`}
+                                      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold border ${
+                                        isColorOut
+                                          ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                          : 'bg-slate-50 text-slate-700 border-slate-200'
+                                      }`}
+                                    >
+                                      <span
+                                        className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                        style={{ backgroundColor: cv.hex || '#64748b' }}
+                                      />
+                                      <span className={isColorOut ? 'line-through' : ''}>{cv.color}</span>
+                                      <span className="font-mono-numbers font-bold">
+                                        {isColorOut ? '0 (Out)' : cv.stock}
                                       </span>
-                                    )}
-                                  </span>
-                                ))}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
                             {p.urduName && (
@@ -505,15 +548,36 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Delete "${p.name}"?`)) deleteProduct(p.id);
-                          }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100"
-                          title="Delete product"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {confirmDeleteId === p.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deleteProduct(p.id);
+                                setConfirmDeleteId(null);
+                              }}
+                              className="px-2 py-1 rounded-md bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-1.5 py-1 rounded-md border border-slate-300 text-[10px] text-slate-600 cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(p.id)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-slate-100 cursor-pointer"
+                            title="Delete product"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -550,13 +614,35 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
 
             <form onSubmit={handleSaveProduct} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-900 mb-1">
+                    Article Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formState.articleNumber ?? ''}
+                    onChange={(e) =>
+                      setFormState((prev) => ({
+                        ...prev,
+                        articleNumber: e.target.value,
+                        verticalAttributes: {
+                          ...prev.verticalAttributes,
+                          articleNumber: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="e.g. Article 1"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 rounded-lg focus:outline-hidden font-bold"
+                  />
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-bold text-slate-900">
-                      Product Title / Name (English / Roman) *
+                      Product Name *
                     </label>
-                    <span className="text-[10px] text-purple-700 font-bold flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" />
+                    <span className="text-[10px] text-purple-700 font-semibold">
                       Auto-Urdu Active
                     </span>
                   </div>
@@ -572,7 +658,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
                         urduName: autoUrduEnabled ? autoTranslateToUrdu(newName) : prev.urduName,
                       }));
                     }}
-                    placeholder="e.g. Pakistan Cables 7/0.029 Coil Red"
+                    placeholder="e.g. Embroidered Lawn 3-Piece Suit"
                     className="w-full px-3 py-2 text-xs border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-purple-500 font-semibold"
                   />
                 </div>
@@ -686,13 +772,25 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
 
                 <div>
                   <label className="block text-xs font-bold text-slate-900 mb-1">
-                    Current Stock Quantity
+                    Total Stock Quantity {(formState.colorVariants?.length || 0) > 0 ? '(Auto-Calculated from Colors)' : ''}
                   </label>
                   <input
                     type="number"
-                    value={formState.stockQuantity ?? 0}
-                    onChange={(e) => setFormState({ ...formState, stockQuantity: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs font-mono-numbers border border-slate-300 bg-white text-slate-900 rounded-lg focus:outline-hidden font-bold"
+                    min="0"
+                    readOnly={(formState.colorVariants?.length || 0) > 0}
+                    value={
+                      (formState.colorVariants?.length || 0) > 0
+                        ? formState.colorVariants.reduce((s, c) => s + Math.max(0, Number(c.stock) || 0), 0)
+                        : formState.stockQuantity ?? 0
+                    }
+                    onChange={(e) =>
+                      setFormState({ ...formState, stockQuantity: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                    className={`w-full px-3 py-2 text-xs font-mono-numbers border border-slate-300 rounded-lg focus:outline-hidden font-bold ${
+                      (formState.colorVariants?.length || 0) > 0
+                        ? 'bg-slate-100 text-slate-900 cursor-not-allowed'
+                        : 'bg-white text-slate-900'
+                    }`}
                   />
                 </div>
 
@@ -885,158 +983,203 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ onOpenAiInge
                     </div>
                   </div>
 
-                  {/* Fabrics & Clothes 1-Set Color Options (7, 8, 9 Colors) & Out-of-Stock Highlights */}
-                  <div className="pt-2 border-t border-slate-200/80 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  {/* Article Color-Wise Stock Distribution (Auto-Calculates Total Quantity) */}
+                  <div className="pt-2 border-t border-slate-200/80 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
                         <Palette className="w-3.5 h-3.5 text-purple-600" />
-                        <span>Fabric & Garment 1-Set Multi-Color Bundle</span>
+                        <span>Color-Wise Stock Distribution (Auto-Calculates Total)</span>
                       </label>
-                      <div className="flex items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const tenSet = STANDARD_ARTICLE_COLORS.map((c) => ({
+                              color: c.color,
+                              hex: c.hex,
+                              stock: 2,
+                              inStock: true,
+                            }));
+                            setColorVariantsWithAutoTotal(tenSet);
+                          }}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          10 Colors × 2 (20 Suits)
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
                             const sevenSet = [
-                              { color: 'Navy Blue', hex: '#1e3a8a', stock: 10, inStock: true },
-                              { color: 'Jet Black', hex: '#09090b', stock: 8, inStock: true },
-                              { color: 'Off White', hex: '#f8fafc', stock: 6, inStock: true },
-                              { color: 'Slate Grey', hex: '#64748b', stock: 5, inStock: true },
-                              { color: 'Camel Brown', hex: '#b45309', stock: 4, inStock: true },
-                              { color: 'Olive Green', hex: '#3f6212', stock: 3, inStock: true },
-                              { color: 'Maroon', hex: '#881337', stock: 0, inStock: false }, // Out of stock design highlight
+                              { color: 'Navy Blue', hex: '#1e3a8a', stock: 4, inStock: true },
+                              { color: 'Jet Black', hex: '#09090b', stock: 4, inStock: true },
+                              { color: 'Off White', hex: '#f8fafc', stock: 4, inStock: true },
+                              { color: 'Slate Grey', hex: '#64748b', stock: 3, inStock: true },
+                              { color: 'Camel Brown', hex: '#b45309', stock: 3, inStock: true },
+                              { color: 'Olive Green', hex: '#3f6212', stock: 2, inStock: true },
+                              { color: 'Maroon', hex: '#881337', stock: 0, inStock: false },
                             ];
-                            setFormState({
-                              ...formState,
-                              colorVariants: sevenSet,
-                              options: { ...formState.options, colors: sevenSet.map((s) => s.color) },
-                            });
+                            setColorVariantsWithAutoTotal(sevenSet);
                           }}
                           className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors cursor-pointer"
                         >
                           7 Colors
                         </button>
-
                         <button
                           type="button"
-                          onClick={() => {
-                            const eightSet = [
-                              { color: 'Navy Blue', hex: '#1e3a8a', stock: 8, inStock: true },
-                              { color: 'Jet Black', hex: '#09090b', stock: 6, inStock: true },
-                              { color: 'Crisp White', hex: '#f8fafc', stock: 5, inStock: true },
-                              { color: 'Slate Grey', hex: '#64748b', stock: 4, inStock: true },
-                              { color: 'Camel Brown', hex: '#b45309', stock: 3, inStock: true },
-                              { color: 'Olive Green', hex: '#3f6212', stock: 3, inStock: true },
-                              { color: 'Ruby Red', hex: '#dc2626', stock: 0, inStock: false }, // Out of stock
-                              { color: 'Charcoal', hex: '#334155', stock: 0, inStock: false }, // Out of stock
-                            ];
-                            setFormState({
-                              ...formState,
-                              colorVariants: eightSet,
-                              options: { ...formState.options, colors: eightSet.map((s) => s.color) },
-                            });
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors cursor-pointer"
+                          onClick={() => setColorVariantsWithAutoTotal([])}
+                          className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors cursor-pointer"
                         >
-                          8 Colors
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nineSet = [
-                              { color: 'Navy Blue', hex: '#1e3a8a', stock: 12, inStock: true },
-                              { color: 'Jet Black', hex: '#09090b', stock: 10, inStock: true },
-                              { color: 'Crisp White', hex: '#f8fafc', stock: 8, inStock: true },
-                              { color: 'Royal Blue', hex: '#2563eb', stock: 6, inStock: true },
-                              { color: 'Emerald Green', hex: '#16a34a', stock: 4, inStock: true },
-                              { color: 'Ruby Red', hex: '#dc2626', stock: 3, inStock: true },
-                              { color: 'Heather Grey', hex: '#94a3b8', stock: 0, inStock: false }, // Out of stock
-                              { color: 'Mustard Yellow', hex: '#ca8a04', stock: 0, inStock: false }, // Out of stock
-                              { color: 'Burgundy', hex: '#701a75', stock: 0, inStock: false }, // Out of stock
-                            ];
-                            setFormState({
-                              ...formState,
-                              colorVariants: nineSet,
-                              options: { ...formState.options, colors: nineSet.map((s) => s.color) },
-                            });
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-200 transition-colors cursor-pointer"
-                        >
-                          9 Colors Set
+                          Clear
                         </button>
                       </div>
                     </div>
 
-                    <p className="text-[10px] text-slate-500">
-                      1 Set bundle colors with stock and out-of-stock highlights. Click status badge to toggle Out of Stock.
-                    </p>
+                    {/* Add Custom Color Row */}
+                    <div className="flex flex-wrap items-center gap-1.5 bg-white p-2 rounded-lg border border-slate-200">
+                      <input
+                        type="color"
+                        value={customColorHex}
+                        onChange={(e) => setCustomColorHex(e.target.value)}
+                        className="w-7 h-7 rounded border border-slate-300 cursor-pointer shrink-0"
+                        title="Pick color swatch"
+                      />
+                      <input
+                        type="text"
+                        value={customColorName}
+                        onChange={(e) => setCustomColorName(e.target.value)}
+                        placeholder="Add color (e.g. T-Pink, Skin)"
+                        className="flex-1 min-w-[130px] px-2 py-1 text-xs border border-slate-300 rounded-md bg-white text-slate-900"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={customColorQty}
+                        onChange={(e) => setCustomColorQty(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-16 px-2 py-1 text-xs text-center font-mono-numbers font-bold border border-slate-300 rounded-md bg-white text-slate-900"
+                        placeholder="Qty"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = customColorName.trim();
+                          if (!clean) return;
+                          const existing = formState.colorVariants || [];
+                          if (existing.length >= 20) return;
+                          const duplicateIdx = existing.findIndex(
+                            (c) => c.color.toLowerCase() === clean.toLowerCase()
+                          );
+                          if (duplicateIdx >= 0) {
+                            const updated = [...existing];
+                            const nextStock = updated[duplicateIdx].stock + customColorQty;
+                            updated[duplicateIdx] = {
+                              ...updated[duplicateIdx],
+                              stock: nextStock,
+                              inStock: nextStock > 0,
+                            };
+                            setColorVariantsWithAutoTotal(updated);
+                          } else {
+                            setColorVariantsWithAutoTotal([
+                              ...existing,
+                              {
+                                color: clean,
+                                hex: customColorHex,
+                                stock: customColorQty,
+                                inStock: customColorQty > 0,
+                              },
+                            ]);
+                          }
+                          setCustomColorName('');
+                          setCustomColorQty(2);
+                        }}
+                        className="px-2.5 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        + Add Color
+                      </button>
+                    </div>
 
-                    {/* Color Swatch & Stock Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[220px] overflow-y-auto p-1 bg-white rounded-xl border border-slate-200">
-                      {(formState.colorVariants || []).map((variant, idx) => (
-                        <div
-                          key={variant.color + idx}
-                          className={`p-2 rounded-lg border flex flex-col justify-between text-xs transition-all ${
-                            !variant.inStock
-                              ? 'bg-rose-50 border-rose-300'
-                              : 'bg-slate-50 border-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1 mb-1">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span
-                                className="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0 shadow-2xs"
-                                style={{ backgroundColor: variant.hex || '#64748b' }}
-                              />
-                              <span className="font-bold text-[11px] truncate text-slate-900">
-                                {variant.color}
-                              </span>
+                    {/* Auto-Calculated Summary Bar */}
+                    {(formState.colorVariants || []).length > 0 && (
+                      <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-900 text-white font-mono-numbers">
+                        <span>
+                          Total Calculated:{' '}
+                          <strong>
+                            {(formState.colorVariants || []).reduce((s, c) => s + Math.max(0, Number(c.stock) || 0), 0)}{' '}
+                            {formState.unit}
+                          </strong>
+                        </span>
+                        <span className="text-slate-300">
+                          {(formState.colorVariants || []).filter((c) => c.stock > 0).length} available ·{' '}
+                          {(formState.colorVariants || []).filter((c) => c.stock <= 0).length} out of stock
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Color Swatch & Quantity Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[220px] overflow-y-auto p-1.5 bg-white rounded-xl border border-slate-200">
+                      {(formState.colorVariants || []).map((variant, idx) => {
+                        const isOut = variant.stock <= 0 || variant.inStock === false;
+                        return (
+                          <div
+                            key={variant.color + idx}
+                            className={`p-2 rounded-lg border flex flex-col justify-between text-xs transition-all ${
+                              isOut
+                                ? 'bg-rose-50 border-rose-300'
+                                : 'bg-slate-50 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className="w-3.5 h-3.5 rounded-full border border-black/20 shrink-0 shadow-2xs"
+                                  style={{ backgroundColor: variant.hex || '#64748b' }}
+                                />
+                                <span className="font-bold text-[11px] truncate text-slate-900">
+                                  {variant.color}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = (formState.colorVariants || []).filter(
+                                    (_, i) => i !== idx
+                                  );
+                                  setColorVariantsWithAutoTotal(updated);
+                                }}
+                                className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                                title="Remove color"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = [...(formState.colorVariants || [])];
-                                const currentInStock = updated[idx].inStock !== false;
-                                updated[idx] = {
-                                  ...updated[idx],
-                                  inStock: !currentInStock,
-                                  stock: !currentInStock ? (updated[idx].stock > 0 ? updated[idx].stock : 5) : 0,
-                                };
-                                setFormState({ ...formState, colorVariants: updated });
-                              }}
-                              className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors ${
-                                variant.inStock !== false
-                                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                                  : 'bg-rose-600 text-white shadow-2xs hover:bg-rose-700'
-                              }`}
-                              title="Click to toggle Out of Stock status"
-                            >
-                              {variant.inStock !== false ? 'In Stock' : 'Out of Stock'}
-                            </button>
+                            <div className="flex items-center justify-between gap-1 mt-1 text-[10px]">
+                              <span
+                                className={`font-bold ${
+                                  isOut ? 'text-rose-700' : 'text-emerald-700'
+                                }`}
+                              >
+                                {isOut ? 'Out of Stock' : 'Available'}
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={variant.stock ?? 0}
+                                onChange={(e) => {
+                                  const newStock = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                                  const updated = [...(formState.colorVariants || [])];
+                                  updated[idx] = {
+                                    ...updated[idx],
+                                    stock: newStock,
+                                    inStock: newStock > 0,
+                                  };
+                                  setColorVariantsWithAutoTotal(updated);
+                                }}
+                                className="w-14 px-1 py-0.5 text-center font-mono-numbers font-bold bg-white text-slate-900 border border-slate-300 rounded text-[11px]"
+                              />
+                            </div>
                           </div>
-
-                          <div className="flex items-center justify-between gap-1 mt-1 text-[10px]">
-                            <span className="text-slate-600 font-semibold">Stock:</span>
-                            <input
-                              type="number"
-                              min="0"
-                              value={variant.stock ?? 0}
-                              onChange={(e) => {
-                                const newStock = Number(e.target.value);
-                                const updated = [...(formState.colorVariants || [])];
-                                updated[idx] = {
-                                  ...updated[idx],
-                                  stock: newStock,
-                                  inStock: newStock > 0,
-                                };
-                                setFormState({ ...formState, colorVariants: updated });
-                              }}
-                              className="w-14 px-1 py-0.5 text-center font-mono-numbers font-bold bg-white text-slate-900 border border-slate-300 rounded text-[10px]"
-                            />
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 

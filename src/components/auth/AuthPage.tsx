@@ -2,8 +2,13 @@ import React, { useState } from 'react';
 import { usePos } from '../../context/PosContext';
 import { BusinessVertical } from '../../types';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
-import { auth, SUPER_ADMIN_EMAIL } from '../../lib/firebase';
+import { auth, SUPER_ADMIN_EMAIL, FIREBASE_AUTH_SETTINGS_URL } from '../../lib/firebase';
 import { offlineDb } from '../../lib/offlineDb';
+import {
+  safeJsonFetch,
+  loginLocalFallbackAccount,
+  registerLocalFallbackAccount,
+} from '../../lib/safeFetch';
 import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -27,6 +32,8 @@ import {
   KeyRound,
   Moon,
   Sun,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 
 export const AuthPage: React.FC = () => {
@@ -55,6 +62,23 @@ export const AuthPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
+  const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isUnauthorizedDomainError = Boolean(
+    error && (error.includes('not authorized for Firebase Auth') || error.includes('unauthorized-domain'))
+  );
+
+  const handleCopyDomain = async () => {
+    if (!currentHostname) return;
+    try {
+      await navigator.clipboard.writeText(currentHostname);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2500);
+    } catch {
+      // Clipboard API may be restricted in some frames
+    }
+  };
 
   const handleGoogleLogin = async () => {
     setError(null);
@@ -222,15 +246,24 @@ export const AuthPage: React.FC = () => {
           }
         }
 
-        // Server-side verified PBKDF2/scrypt login
-        const res = await fetch('/api/auth/login', {
+        // Server-side verified PBKDF2/scrypt login (with static Vercel deployment fallback)
+        const res = await safeJsonFetch<{ user?: any; error?: string }>('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: normalizedEmail, password }),
         });
-        const data = await res.json();
-        if (!res.ok || !data.user) {
-          throw new Error(data.error || 'Invalid email or password. Or use Continue with Google.');
+
+        let authedUser: { id: string | number; name: string; email: string; role?: string; storeName?: string };
+        if (res.isStaticFallback) {
+          const localLogin = await loginLocalFallbackAccount(normalizedEmail, password);
+          if (!localLogin.success || !localLogin.user) {
+            throw new Error(localLogin.error || 'Account not found on this deployment. Create a new account or continue with Google.');
+          }
+          authedUser = localLogin.user;
+        } else if (!res.ok || !res.data?.user) {
+          throw new Error(res.data?.error || res.error || 'Invalid email or password. Or use Continue with Google.');
+        } else {
+          authedUser = res.data.user;
         }
 
         const matchedBiz = businessAccounts.find(
@@ -239,8 +272,8 @@ export const AuthPage: React.FC = () => {
         const targetBiz =
           matchedBiz ||
           registerBusinessAccount({
-            businessName: data.user.storeName || `${data.user.name}'s Store`,
-            ownerName: data.user.name,
+            businessName: authedUser.storeName || `${authedUser.name}'s Store`,
+            ownerName: authedUser.name,
             ownerEmail: normalizedEmail,
             phone: '',
             city: '',
@@ -250,9 +283,9 @@ export const AuthPage: React.FC = () => {
         switchBusinessAccount(targetBiz.id, targetBiz);
 
         await offlineDb.saveCachedSession({
-          uid: `usr_${data.user.id}`,
+          uid: `usr_${authedUser.id}`,
           email: normalizedEmail,
-          displayName: data.user.name,
+          displayName: authedUser.name,
           role: normalizedEmail === SUPER_ADMIN_EMAIL ? 'admin' : 'owner',
           activeStoreId: targetBiz.id,
           lastVerifiedAt: new Date().toISOString(),
@@ -260,8 +293,8 @@ export const AuthPage: React.FC = () => {
 
         setUserSession({
           email: normalizedEmail,
-          displayName: data.user.name,
-          role: data.user.role || 'admin',
+          displayName: authedUser.name,
+          role: (authedUser.role as any) || 'admin',
           storeId: targetBiz.id,
           isGoogleSignedIn: false,
           isAuthenticated: true,
@@ -288,8 +321,8 @@ export const AuthPage: React.FC = () => {
           throw new Error('Password must be at least 6 characters long.');
         }
 
-        // Register on server with salted cryptographic hashing
-        const regRes = await fetch('/api/auth/register', {
+        // Register on server with salted cryptographic hashing (or browser-side Web Crypto fallback on static Vercel deploys)
+        const regRes = await safeJsonFetch<{ user?: any; error?: string }>('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -300,13 +333,28 @@ export const AuthPage: React.FC = () => {
             storeName: storeName.trim(),
           }),
         });
-        const regData = await regRes.json();
-        if (!regRes.ok) {
-          throw new Error(regData.error || 'Could not register account.');
+
+        let registeredUserId: string | number = Date.now();
+        if (regRes.isStaticFallback) {
+          const localReg = await registerLocalFallbackAccount({
+            name: fullName.trim(),
+            email: normalizedEmail,
+            password,
+            role: 'admin',
+            storeName: storeName.trim(),
+          });
+          if (!localReg.success || !localReg.user) {
+            throw new Error(localReg.error || 'Could not register account.');
+          }
+          registeredUserId = localReg.user.id;
+        } else if (!regRes.ok) {
+          throw new Error(regRes.data?.error || regRes.error || 'Could not register account.');
+        } else if (regRes.data?.user?.id) {
+          registeredUserId = regRes.data.user.id;
         }
 
         // Also register in Firebase Email/Password if enabled
-        let uid = `usr_${regData.user?.id || Date.now()}`;
+        let uid = `usr_${registeredUserId}`;
         try {
           const fbCred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
           await updateProfile(fbCred.user, { displayName: fullName.trim() });
@@ -524,9 +572,37 @@ export const AuthPage: React.FC = () => {
             )}
 
             {error && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{error}</span>
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+                {isUnauthorizedDomainError && currentHostname && (
+                  <div className="pt-2 border-t border-rose-200/70 dark:border-rose-800/70 space-y-2">
+                    <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-900 rounded-lg px-2.5 py-1.5 border border-rose-200 dark:border-rose-900">
+                      <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate">
+                        {currentHostname}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={handleCopyDomain}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[10px] font-semibold shrink-0 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>{copiedDomain ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <a
+                      href={FIREBASE_AUTH_SETTINGS_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 font-semibold text-rose-800 dark:text-rose-200 hover:underline"
+                    >
+                      <span>Open Firebase Console → Authorized domains</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 

@@ -43,6 +43,7 @@ import {
   StaffAccount,
   EstimateRecord,
   PaymentMethod,
+  ColorStockHistoryEntry,
 } from '../types';
 import {
   INITIAL_PRODUCTS,
@@ -100,6 +101,7 @@ import {
   fetchCloudSales,
 } from '../lib/firestoreSync';
 import { backgroundSyncService } from '../lib/backgroundSyncService';
+import { safeJsonFetch } from '../lib/safeFetch';
 import {
   BOUTIQUE_FEATURED_PRODUCTS,
   BOUTIQUE_COUPONS,
@@ -157,17 +159,37 @@ interface PosContextType {
   outOfStockItems: Product[];
   lowStockItems: Product[];
   
-  // Cart
+  // Cart & Article-Color Stock Validation
   cart: CartItem[];
-  addToCart: (product: Product, qty?: number, options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }) => void;
+  addToCart: (
+    product: Product,
+    qty?: number,
+    options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }
+  ) => { ok: boolean; error?: string };
+  addMultipleColorsToCart: (
+    product: Product,
+    selections: { color: string; quantity: number; size?: string }[]
+  ) => { ok: boolean; error?: string; addedCount?: number };
   removeFromCart: (productId: string) => void;
   removeCartItemAt: (index: number) => void;
-  updateCartQuantity: (productId: string, qty: number) => void;
+  updateCartQuantity: (productId: string, qty: number) => { ok: boolean; error?: string };
   updateCartItemAt: (
     index: number,
     patch: { quantity?: number; selectedColor?: string; selectedSize?: string; discount?: number }
-  ) => void;
+  ) => { ok: boolean; error?: string };
   clearCart: () => void;
+  getLiveColorStock: (productId: string, color?: string) => number;
+  getRemainingColorStock: (productId: string, color?: string, excludeCartIndex?: number) => number;
+  validateCartStock: () => { valid: boolean; errors: string[] };
+  restockProductColor: (
+    productId: string,
+    colorName: string,
+    addQty: number,
+    hex?: string,
+    note?: string
+  ) => { ok: boolean; error?: string };
+  cancelSale: (saleId: string, reason?: string) => { ok: boolean; error?: string };
+  colorStockHistory: ColorStockHistoryEntry[];
   heldOrders: HeldOrder[];
   holdCurrentOrder: (customerName?: string, note?: string) => HeldOrder | null;
   resumeHeldOrder: (orderId: string) => void;
@@ -1256,18 +1278,13 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const refreshDatabaseStatus = async () => {
-    try {
-      const res = await fetch('/api/database/status');
-      if (res.ok) {
-        const data = await res.json();
-        setDatabaseStatus((prev) => ({
-          ...prev,
-          ...data,
-          lastSync: new Date().toLocaleTimeString(),
-        }));
-      }
-    } catch (e) {
-      console.warn('Database health check offline fallback:', e);
+    const res = await safeJsonFetch('/api/database/status');
+    if (res.ok && res.data) {
+      setDatabaseStatus((prev) => ({
+        ...prev,
+        ...res.data,
+        lastSync: new Date().toLocaleTimeString(),
+      }));
     }
   };
 
@@ -1275,40 +1292,42 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     email: string,
     pass: string
   ): Promise<{ success: boolean; message: string; user?: any }> => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: pass }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setUserSession({
-          email: data.user.email,
-          displayName: data.user.name,
-          role: data.user.role || 'admin',
-          storeId: activeBusinessId,
-          isGoogleSignedIn: true,
-          permissions: {
-            canDiscount: true,
-            canEditPrices: true,
-            canAccessAdmin: true,
-            canManageStock: true,
-            canViewProfit: true,
-            canGiveUdhar: true,
-          },
-        });
-        sounds.playCheckoutChime();
-        return {
-          success: true,
-          message: 'Database login verified! PBKDF2 SHA-512 authentication succeeded.',
-          user: data.user,
-        };
-      }
-      return { success: false, message: data.error || 'Invalid credentials against database table' };
-    } catch (err: any) {
-      return { success: false, message: err.message || 'Server connection error' };
+    const res = await safeJsonFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass }),
+    });
+    if (res.isStaticFallback) {
+      return {
+        success: false,
+        message: 'Static hosting detected (no Express /api backend). Use Google Sign-In / Firebase Firestore.',
+      };
     }
+    const data = res.data;
+    if (res.ok && data?.success) {
+      setUserSession({
+        email: data.user.email,
+        displayName: data.user.name,
+        role: data.user.role || 'admin',
+        storeId: activeBusinessId,
+        isGoogleSignedIn: true,
+        permissions: {
+          canDiscount: true,
+          canEditPrices: true,
+          canAccessAdmin: true,
+          canManageStock: true,
+          canViewProfit: true,
+          canGiveUdhar: true,
+        },
+      });
+      sounds.playCheckoutChime();
+      return {
+        success: true,
+        message: 'Database login verified! PBKDF2 SHA-512 authentication succeeded.',
+        user: data.user,
+      };
+    }
+    return { success: false, message: data?.error || res.error || 'Invalid credentials against database table' };
   };
 
   // Switch Business Tenant Account (Multi-user Data Privacy)
@@ -1517,6 +1536,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const code = err?.code || '';
       if (code === 'auth/popup-closed-by-user') {
         return { success: false, message: 'Sign-in popup was closed before completing.' };
+      }
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'your Vercel domain';
+        return {
+          success: false,
+          message: `Domain "${host}" is not authorized for Firebase Auth yet. In Firebase Console (project gen-lang-client-0186806310), go to Authentication → Settings → Authorized domains and add "${host}".`,
+        };
+      }
+      if (code === 'auth/popup-blocked') {
+        return { success: false, message: 'Sign-in popup was blocked by your browser. Allow popups for this site and try again.' };
       }
       return { success: false, message: err?.message || 'Google Sign-In failed.' };
     }
@@ -1734,36 +1763,209 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     safeLimitCount: khatas.filter((k) => k.currentBalance < (k.creditLimit || 50000) * 0.5).length,
   };
 
-  // Cart operations
-  // Cart operations with Color, Size, Sub-Category and 0-Stock tracking
+  // Color-wise stock movement history (persisted per store)
+  const [colorStockHistory, setColorStockHistory] = useState<ColorStockHistoryEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_color_stock_history`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`apna_pos_${activeBusinessId}_color_stock_history`);
+      setColorStockHistory(saved ? JSON.parse(saved) : []);
+    } catch {
+      setColorStockHistory([]);
+    }
+  }, [activeBusinessId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `apna_pos_${activeBusinessId}_color_stock_history`,
+        JSON.stringify(colorStockHistory.slice(0, 300))
+      );
+    } catch {}
+  }, [colorStockHistory, activeBusinessId]);
+
+  const appendColorStockHistory = (entries: ColorStockHistoryEntry[]) => {
+    if (entries.length === 0) return;
+    setColorStockHistory((prev) => [...entries, ...prev].slice(0, 300));
+  };
+
+  const getProductArticleLabel = (p: Product): string =>
+    p.articleNumber || p.verticalAttributes?.articleNumber || p.barcode || p.name;
+
+  // Live stock lookup for a product + specific color
+  const getLiveColorStock = (productId: string, color?: string): number => {
+    const prod = products.find((p) => p.id === productId);
+    if (!prod) return 0;
+    if (prod.colorVariants && prod.colorVariants.length > 0) {
+      if (color) {
+        const match = prod.colorVariants.find(
+          (cv) => cv.color.trim().toLowerCase() === color.trim().toLowerCase()
+        );
+        if (!match || match.inStock === false) return 0;
+        return Math.max(0, Number(match.stock) || 0);
+      }
+      return prod.colorVariants.reduce(
+        (sum, cv) => sum + (cv.inStock === false ? 0 : Math.max(0, Number(cv.stock) || 0)),
+        0
+      );
+    }
+    return Math.max(0, Number(prod.stockQuantity) || 0);
+  };
+
+  // Remaining stock after subtracting units already sitting in the active cart
+  const getRemainingColorStock = (
+    productId: string,
+    color?: string,
+    excludeCartIndex?: number
+  ): number => {
+    const liveStock = getLiveColorStock(productId, color);
+    const prod = products.find((p) => p.id === productId);
+    const hasVariants = !!(prod?.colorVariants && prod.colorVariants.length > 0);
+    const normalizedColor = (color || '').trim().toLowerCase();
+
+    const inCartQty = cart.reduce((sum, item, idx) => {
+      if (excludeCartIndex !== undefined && idx === excludeCartIndex) return sum;
+      if (item.product.id !== productId) return sum;
+      if (hasVariants && normalizedColor) {
+        const itemColor = (item.selectedColor || item.product.color || '').trim().toLowerCase();
+        return itemColor === normalizedColor ? sum + item.quantity : sum;
+      }
+      return sum + item.quantity;
+    }, 0);
+
+    return Math.max(0, liveStock - inCartQty);
+  };
+
+  // Validate entire cart against live article & color stock before checkout
+  const validateCartStock = (): { valid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    const grouped = new Map<
+      string,
+      { productId: string; color: string; qty: number; product: Product }
+    >();
+
+    for (const item of cart) {
+      const liveProd = products.find((p) => p.id === item.product.id) || item.product;
+      const hasVariants = !!(liveProd.colorVariants && liveProd.colorVariants.length > 0);
+      const colorKey = hasVariants ? (item.selectedColor || liveProd.color || '').trim() : '';
+      const key = `${liveProd.id}::${colorKey.toLowerCase()}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.qty += item.quantity;
+      } else {
+        grouped.set(key, {
+          productId: liveProd.id,
+          color: colorKey,
+          qty: item.quantity,
+          product: liveProd,
+        });
+      }
+    }
+
+    grouped.forEach(({ productId, color, qty, product }) => {
+      const label = getProductArticleLabel(product);
+      const available = getLiveColorStock(productId, color || undefined);
+      if (available <= 0) {
+        errors.push(
+          color
+            ? `${label} (${color}) is Out of Stock and cannot be sold.`
+            : `${label} is Out of Stock and cannot be sold.`
+        );
+      } else if (qty > available) {
+        errors.push(
+          color
+            ? `Only ${available} ${product.unit} available for ${label} (${color}), but ${qty} requested.`
+            : `Only ${available} ${product.unit} available for ${label}, but ${qty} requested.`
+        );
+      }
+    });
+
+    return { valid: errors.length === 0, errors };
+  };
+
+  // Cart operations with strict Color-Wise Stock Validation
   const addToCart = (
     product: Product,
     qty: number = 1,
     options?: { selectedColor?: string; selectedSize?: string; subCategory?: string }
-  ) => {
-    sounds.playScanBeep();
-    const isZeroStock = (product.stockQuantity || 0) <= 0;
-    const colorToUse = options?.selectedColor || product.color || '';
-    const sizeToUse = options?.selectedSize || product.size || '';
-    const subCatToUse = options?.subCategory || product.subSize || product.category || '';
+  ): { ok: boolean; error?: string } => {
+    const requestedQty = Math.floor(Number(qty) || 0);
+    if (requestedQty <= 0) {
+      return { ok: false, error: 'Quantity must be at least 1.' };
+    }
 
+    const liveProduct = products.find((p) => p.id === product.id) || product;
+    const hasVariants = !!(liveProduct.colorVariants && liveProduct.colorVariants.length > 0);
+    const firstAvailableColor =
+      liveProduct.colorVariants?.find((cv) => cv.inStock !== false && cv.stock > 0)?.color || '';
+    const colorToUse =
+      options?.selectedColor || (hasVariants ? firstAvailableColor : liveProduct.color || '');
+    const sizeToUse = options?.selectedSize || liveProduct.size || '';
+    const subCatToUse = options?.subCategory || liveProduct.subSize || liveProduct.category || '';
+    const articleLabel = getProductArticleLabel(liveProduct);
+
+    if (hasVariants) {
+      if (!colorToUse) {
+        return {
+          ok: false,
+          error: `${articleLabel} has no available colors in stock.`,
+        };
+      }
+      const remaining = getRemainingColorStock(liveProduct.id, colorToUse);
+      if (remaining <= 0) {
+        return {
+          ok: false,
+          error: `${articleLabel} — ${colorToUse} is Out of Stock (0 remaining).`,
+        };
+      }
+      if (requestedQty > remaining) {
+        return {
+          ok: false,
+          error: `Only ${remaining} ${liveProduct.unit} of ${articleLabel} (${colorToUse}) available in stock.`,
+        };
+      }
+    } else {
+      const remaining = getRemainingColorStock(liveProduct.id);
+      if (remaining <= 0) {
+        return {
+          ok: false,
+          error: `${articleLabel} is Out of Stock (0 remaining).`,
+        };
+      }
+      if (requestedQty > remaining) {
+        return {
+          ok: false,
+          error: `Only ${remaining} ${liveProduct.unit} of ${articleLabel} available in stock.`,
+        };
+      }
+    }
+
+    sounds.playScanBeep();
     setCart((prev) => {
       const existing = prev.find(
         (item) =>
-          item.product.id === product.id &&
-          (item.selectedColor || '') === colorToUse &&
+          item.product.id === liveProduct.id &&
+          (item.selectedColor || '').toLowerCase() === colorToUse.toLowerCase() &&
           (item.selectedSize || '') === sizeToUse &&
           (item.subCategory || '') === subCatToUse
       );
       if (existing) {
-        const newQty = existing.quantity + qty;
+        const newQty = existing.quantity + requestedQty;
         return prev.map((item) =>
           item === existing
             ? {
                 ...item,
+                product: liveProduct,
                 quantity: newQty,
                 subtotal: Math.max(0, newQty * item.unitPrice - item.discount),
-                wasZeroStock: isZeroStock,
+                wasZeroStock: false,
               }
             : item
         );
@@ -1771,18 +1973,99 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [
         ...prev,
         {
-          product,
-          quantity: qty,
-          unitPrice: product.retailPrice,
+          product: liveProduct,
+          quantity: requestedQty,
+          unitPrice: liveProduct.retailPrice,
           discount: 0,
-          subtotal: qty * product.retailPrice,
+          subtotal: requestedQty * liveProduct.retailPrice,
           selectedColor: colorToUse,
           selectedSize: sizeToUse,
           subCategory: subCatToUse,
-          wasZeroStock: isZeroStock,
+          wasZeroStock: false,
         },
       ];
     });
+
+    return { ok: true };
+  };
+
+  // Atomic multi-color add to cart for a single article (e.g. Red=1, Blue=1, Green=1, Pink=1 -> 4 Suits)
+  const addMultipleColorsToCart = (
+    product: Product,
+    selections: { color: string; quantity: number; size?: string }[]
+  ): { ok: boolean; error?: string; addedCount?: number } => {
+    const liveProduct = products.find((p) => p.id === product.id) || product;
+    const articleLabel = getProductArticleLabel(liveProduct);
+    const validRows = selections.filter((s) => Number(s.quantity) > 0);
+    if (validRows.length === 0) {
+      return { ok: false, error: 'Select at least 1 suit across available colors.' };
+    }
+
+    // Validate every selected color BEFORE mutating cart
+    for (const row of validRows) {
+      const qty = Math.floor(Number(row.quantity) || 0);
+      if (qty <= 0) {
+        return { ok: false, error: `Invalid quantity for ${row.color}.` };
+      }
+      const remaining = getRemainingColorStock(liveProduct.id, row.color);
+      if (remaining <= 0) {
+        return {
+          ok: false,
+          error: `${articleLabel} — ${row.color} is Out of Stock and cannot be selected.`,
+        };
+      }
+      if (qty > remaining) {
+        return {
+          ok: false,
+          error: `Requested ${qty} of ${articleLabel} (${row.color}), but only ${remaining} available in stock.`,
+        };
+      }
+    }
+
+    sounds.playScanBeep();
+    const subCatToUse = liveProduct.subSize || liveProduct.category || '';
+    let totalAdded = 0;
+
+    setCart((prev) => {
+      let next = [...prev];
+      for (const row of validRows) {
+        const qty = Math.floor(Number(row.quantity));
+        const sizeToUse = row.size || liveProduct.size || '';
+        totalAdded += qty;
+        const idx = next.findIndex(
+          (item) =>
+            item.product.id === liveProduct.id &&
+            (item.selectedColor || '').toLowerCase() === row.color.toLowerCase() &&
+            (item.selectedSize || '') === sizeToUse &&
+            (item.subCategory || '') === subCatToUse
+        );
+        if (idx >= 0) {
+          const updatedQty = next[idx].quantity + qty;
+          next[idx] = {
+            ...next[idx],
+            product: liveProduct,
+            quantity: updatedQty,
+            subtotal: Math.max(0, updatedQty * next[idx].unitPrice - next[idx].discount),
+            wasZeroStock: false,
+          };
+        } else {
+          next.push({
+            product: liveProduct,
+            quantity: qty,
+            unitPrice: liveProduct.retailPrice,
+            discount: 0,
+            subtotal: qty * liveProduct.retailPrice,
+            selectedColor: row.color,
+            selectedSize: sizeToUse,
+            subCategory: subCatToUse,
+            wasZeroStock: false,
+          });
+        }
+      }
+      return next;
+    });
+
+    return { ok: true, addedCount: totalAdded };
   };
 
   // Held Orders, Boutique Coupons & Customer Loyalty Points (persisted per store)
@@ -1869,47 +2152,76 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateCartQuantity = (productId: string, qty: number) => {
+  const updateCartQuantity = (productId: string, qty: number): { ok: boolean; error?: string } => {
     if (qty <= 0) {
       removeFromCart(productId);
-      return;
+      return { ok: true };
     }
-    setCart((prev) =>
-      prev.map((item) =>
-        item.product.id === productId
-          ? {
-              ...item,
-              quantity: qty,
-              subtotal: Math.max(0, qty * item.unitPrice - item.discount),
-            }
-          : item
-      )
-    );
+    const idx = cart.findIndex((i) => i.product.id === productId);
+    if (idx === -1) return { ok: false, error: 'Item not found in cart.' };
+    return updateCartItemAt(idx, { quantity: qty });
   };
 
   const updateCartItemAt = (
     index: number,
     patch: { quantity?: number; selectedColor?: string; selectedSize?: string; discount?: number }
-  ) => {
+  ): { ok: boolean; error?: string } => {
+    const targetItem = cart[index];
+    if (!targetItem) return { ok: false, error: 'Cart line not found.' };
+
     if (patch.quantity !== undefined && patch.quantity <= 0) {
       removeCartItemAt(index);
-      return;
+      return { ok: true };
     }
+
+    const nextQty = patch.quantity !== undefined ? Math.floor(patch.quantity) : targetItem.quantity;
+    const nextColor =
+      patch.selectedColor !== undefined ? patch.selectedColor : targetItem.selectedColor;
+    const liveProd = products.find((p) => p.id === targetItem.product.id) || targetItem.product;
+    const hasVariants = !!(liveProd.colorVariants && liveProd.colorVariants.length > 0);
+    const articleLabel = getProductArticleLabel(liveProd);
+
+    if (hasVariants) {
+      const remaining = getRemainingColorStock(liveProd.id, nextColor, index);
+      if (remaining <= 0) {
+        return {
+          ok: false,
+          error: `${articleLabel} (${nextColor || 'Selected color'}) is Out of Stock.`,
+        };
+      }
+      if (nextQty > remaining) {
+        return {
+          ok: false,
+          error: `Maximum stock reached for ${articleLabel} (${nextColor}): only ${remaining} ${liveProd.unit} available.`,
+        };
+      }
+    } else {
+      const remaining = getRemainingColorStock(liveProd.id, undefined, index);
+      if (nextQty > remaining) {
+        return {
+          ok: false,
+          error: `Maximum stock reached for ${articleLabel}: only ${remaining} ${liveProd.unit} available.`,
+        };
+      }
+    }
+
     setCart((prev) =>
       prev.map((item, i) => {
         if (i !== index) return item;
-        const nextQty = patch.quantity !== undefined ? patch.quantity : item.quantity;
         const nextDisc = patch.discount !== undefined ? patch.discount : item.discount;
         return {
           ...item,
+          product: liveProd,
           quantity: nextQty,
-          selectedColor: patch.selectedColor !== undefined ? patch.selectedColor : item.selectedColor,
+          selectedColor: nextColor,
           selectedSize: patch.selectedSize !== undefined ? patch.selectedSize : item.selectedSize,
           discount: nextDisc,
           subtotal: Math.max(0, nextQty * item.unitPrice - nextDisc),
         };
       })
     );
+
+    return { ok: true };
   };
 
   const clearCart = () => {
@@ -1927,7 +2239,13 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const cartDiscountAmount = cartDiscount;
   const cartTaxAmount = Math.round(Math.max(0, cartSubtotal - cartDiscountAmount) * (cartTaxRate / 100));
   const cartGrandTotal = Math.max(0, cartSubtotal - cartDiscountAmount + cartTaxAmount + cartDeliveryFee);
-  const hasZeroStockInCart = cart.some((item) => (item.product.stockQuantity || 0) <= 0);
+  const hasZeroStockInCart = cart.some((item) => {
+    const liveProd = products.find((p) => p.id === item.product.id) || item.product;
+    if (liveProd.colorVariants && liveProd.colorVariants.length > 0) {
+      return getLiveColorStock(liveProd.id, item.selectedColor || liveProd.color) <= 0;
+    }
+    return (liveProd.stockQuantity || 0) <= 0;
+  });
 
   const holdCurrentOrder = (customerName?: string, note?: string): HeldOrder | null => {
     if (cart.length === 0) return null;
@@ -1982,9 +2300,10 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     redeemedPoints?: number;
     openReceipt?: boolean;
   }): SaleRecord => {
-    // Strict business rule: 0-stock items can ONLY be added on an Estimate / Quotation!
-    if (hasZeroStockInCart) {
-      throw new Error('Cart contains 0-Stock item(s). Out-of-stock items can only be added on an Estimate / Quotation!');
+    // Strict color-wise & article stock validation before completing sale
+    const stockCheck = validateCartStock();
+    if (!stockCheck.valid) {
+      throw new Error(stockCheck.errors[0] || 'Insufficient color stock to complete sale.');
     }
 
     const invoiceNo = `POS-${new Date().getFullYear()}-${String(sales.length + 1).padStart(4, '0')}`;
@@ -1997,15 +2316,17 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const finalTaxRate = paymentInfo.taxRate !== undefined ? paymentInfo.taxRate : cartTaxRate;
     const profit = cartGrandTotal - totalCost;
     const currentIsOffline = isOffline || !navigator.onLine;
+    const nowIso = new Date().toISOString();
 
     const saleRecord: SaleRecord = {
       id: `sale-${Date.now()}`,
       invoiceNo,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       customerName: paymentInfo.customerName || 'Walk-in Customer',
       customerPhone: paymentInfo.customerPhone,
       items: cart.map((c) => ({
         productId: c.product.id,
+        articleNumber: c.product.articleNumber || c.product.verticalAttributes?.articleNumber || c.product.barcode,
         name: c.product.name,
         quantity: c.quantity,
         unit: c.product.unit,
@@ -2033,7 +2354,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: paymentInfo.notes,
       isOfflineSale: currentIsOffline,
       isOfflineSyncPending: currentIsOffline,
-      syncedAt: currentIsOffline ? undefined : new Date().toISOString(),
+      syncedAt: currentIsOffline ? undefined : nowIso,
+      status: 'completed',
     };
 
     if (currentIsOffline) {
@@ -2061,7 +2383,6 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
       .then((res) => {
         if (!res.syncedImmediately && !currentIsOffline) {
-          // Live push fell back to IndexedDB offline cache (e.g. brief network drop)
           setSales((prev) =>
             prev.map((s) =>
               s.id === saleRecord.id
@@ -2094,35 +2415,104 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Deduct stock across all variant lines in cart and queue/sync updated stock online
-    const todayIsoDate = new Date().toISOString().split('T')[0];
+    // Deduct stock per article AND per exact color variant, recompute totals, and log stock history
+    const todayIsoDate = nowIso.split('T')[0];
     const qtyByProductId = new Map<string, number>();
+    const colorQtyByProduct = new Map<string, Map<string, number>>();
+
     for (const c of cart) {
       qtyByProductId.set(c.product.id, (qtyByProductId.get(c.product.id) || 0) + c.quantity);
+      const colorKey = (c.selectedColor || c.product.color || '').trim().toLowerCase();
+      if (colorKey) {
+        if (!colorQtyByProduct.has(c.product.id)) {
+          colorQtyByProduct.set(c.product.id, new Map());
+        }
+        const cmap = colorQtyByProduct.get(c.product.id)!;
+        cmap.set(colorKey, (cmap.get(colorKey) || 0) + c.quantity);
+      }
     }
+
+    const historyEntries: ColorStockHistoryEntry[] = [];
+    const applyDeduction = (prod: Product): Product => {
+      const totalQty = qtyByProductId.get(prod.id) || 0;
+      if (totalQty <= 0) return prod;
+
+      const articleNo = getProductArticleLabel(prod);
+      const cmap = colorQtyByProduct.get(prod.id);
+
+      if (prod.colorVariants && prod.colorVariants.length > 0) {
+        const updatedVariants = prod.colorVariants.map((cv) => {
+          const soldForColor = cmap?.get(cv.color.trim().toLowerCase()) || 0;
+          if (soldForColor <= 0) return cv;
+          const prevStock = Math.max(0, Number(cv.stock) || 0);
+          const nextStock = Math.max(0, prevStock - soldForColor);
+          historyEntries.push({
+            id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: nowIso,
+            productId: prod.id,
+            articleNumber: articleNo,
+            productName: prod.name,
+            color: cv.color,
+            hex: cv.hex,
+            type: 'sale',
+            quantityDelta: -soldForColor,
+            previousStock: prevStock,
+            newStock: nextStock,
+            referenceNo: invoiceNo,
+            note: `Sold to ${paymentInfo.customerName || 'Walk-in Customer'}`,
+          });
+          return {
+            ...cv,
+            stock: nextStock,
+            inStock: nextStock > 0,
+          };
+        });
+        const recomputedTotal = updatedVariants.reduce(
+          (sum, cv) => sum + (cv.inStock === false ? 0 : Math.max(0, Number(cv.stock) || 0)),
+          0
+        );
+        const firstAvailable = updatedVariants.find((cv) => cv.stock > 0 && cv.inStock !== false)?.color;
+        return {
+          ...prod,
+          colorVariants: updatedVariants,
+          stockQuantity: recomputedTotal,
+          color: firstAvailable || prod.color,
+          lastUpdated: todayIsoDate,
+        };
+      }
+
+      const prevStock = Math.max(0, Number(prod.stockQuantity) || 0);
+      const nextStock = Math.max(0, prevStock - totalQty);
+      historyEntries.push({
+        id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: nowIso,
+        productId: prod.id,
+        articleNumber: articleNo,
+        productName: prod.name,
+        color: prod.color || 'Default',
+        type: 'sale',
+        quantityDelta: -totalQty,
+        previousStock: prevStock,
+        newStock: nextStock,
+        referenceNo: invoiceNo,
+        note: `Sold to ${paymentInfo.customerName || 'Walk-in Customer'}`,
+      });
+      return {
+        ...prod,
+        stockQuantity: nextStock,
+        lastUpdated: todayIsoDate,
+      };
+    };
+
     const modifiedProducts: Product[] = products
       .filter((prod) => (qtyByProductId.get(prod.id) || 0) > 0)
-      .map((prod) => ({
-        ...prod,
-        stockQuantity: Math.max(0, prod.stockQuantity - (qtyByProductId.get(prod.id) || 0)),
-        lastUpdated: todayIsoDate,
-      }));
+      .map(applyDeduction);
 
-    setProducts((prev) =>
-      prev.map((prod) => {
-        const totalQty = qtyByProductId.get(prod.id) || 0;
-        if (totalQty > 0) {
-          return {
-            ...prod,
-            stockQuantity: Math.max(0, prod.stockQuantity - totalQty),
-            lastUpdated: todayIsoDate,
-          };
-        }
-        return prod;
-      })
-    );
+    const modifiedMap = new Map(modifiedProducts.map((p) => [p.id, p]));
+    setProducts((prev) => prev.map((prod) => modifiedMap.get(prod.id) || prod));
+    appendColorStockHistory(historyEntries);
 
-    // Push stock deductions to Cloud Firestore (or enqueue in IndexedDB when offline)
+    // Push stock deductions (including updated colorVariants) to Cloud Firestore / IndexedDB
     if (modifiedProducts.length > 0) {
       for (const updatedProd of modifiedProducts) {
         void syncProductToCloud(activeBusinessId, updatedProd, 'upsert', currentIsOffline).catch(() => {});
@@ -2402,29 +2792,343 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // Product Catalog
+  // Product Catalog (auto-calculates total stockQuantity from colorVariants when provided)
   const addProduct = (newProd: Omit<Product, 'id' | 'lastUpdated'>): Product => {
+    const nowIso = new Date().toISOString();
+    const normalizedVariants =
+      newProd.colorVariants && newProd.colorVariants.length > 0
+        ? newProd.colorVariants.map((cv) => {
+            const safeStock = Math.max(0, Math.floor(Number(cv.stock) || 0));
+            return {
+              ...cv,
+              color: cv.color.trim(),
+              stock: safeStock,
+              inStock: safeStock > 0,
+            };
+          })
+        : newProd.colorVariants;
+
+    const autoTotalStock =
+      normalizedVariants && normalizedVariants.length > 0
+        ? normalizedVariants.reduce((sum, cv) => sum + cv.stock, 0)
+        : Math.max(0, Math.floor(Number(newProd.stockQuantity) || 0));
+
+    const articleNumber =
+      newProd.articleNumber?.trim() ||
+      newProd.verticalAttributes?.articleNumber ||
+      `Article ${products.length + 1}`;
+
     const product: Product = {
       ...newProd,
       id: `prod-${Date.now()}`,
-      lastUpdated: new Date().toISOString().split('T')[0],
+      articleNumber,
+      colorVariants: normalizedVariants,
+      stockQuantity: autoTotalStock,
+      color:
+        normalizedVariants?.find((cv) => cv.stock > 0)?.color ||
+        normalizedVariants?.[0]?.color ||
+        newProd.color,
+      options: {
+        ...newProd.options,
+        colors:
+          normalizedVariants && normalizedVariants.length > 0
+            ? normalizedVariants.map((cv) => cv.color)
+            : newProd.options?.colors,
+      },
+      verticalAttributes: {
+        ...(newProd.verticalAttributes || {}),
+        articleNumber,
+      },
+      lastUpdated: nowIso.split('T')[0],
     };
+
     setProducts((prev) => [product, ...prev]);
+    if (normalizedVariants && normalizedVariants.length > 0) {
+      appendColorStockHistory(
+        normalizedVariants
+          .filter((cv) => cv.stock > 0)
+          .map((cv) => ({
+            id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: nowIso,
+            productId: product.id,
+            articleNumber,
+            productName: product.name,
+            color: cv.color,
+            hex: cv.hex,
+            type: 'initial_entry' as const,
+            quantityDelta: cv.stock,
+            previousStock: 0,
+            newStock: cv.stock,
+            note: 'Initial article stock entry',
+          }))
+      );
+    }
     void syncProductToCloud(activeBusinessId, product, 'upsert').catch(() => {});
-    logActivity('inventory', 'Added Product', `${product.name} (${storeProfile.currency} ${product.retailPrice})`);
+    logActivity('inventory', 'Added Article', `${articleNumber} • ${product.name} (${autoTotalStock} ${product.unit})`);
     return product;
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
+    const todayIso = new Date().toISOString().split('T')[0];
     setProducts((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        const updated = { ...p, ...updates, lastUpdated: new Date().toISOString().split('T')[0] };
+        const nextVariants =
+          updates.colorVariants !== undefined
+            ? updates.colorVariants.map((cv) => {
+                const safeStock = Math.max(0, Math.floor(Number(cv.stock) || 0));
+                return {
+                  ...cv,
+                  color: cv.color.trim(),
+                  stock: safeStock,
+                  inStock: safeStock > 0,
+                };
+              })
+            : p.colorVariants;
+
+        const nextStockQuantity =
+          updates.colorVariants !== undefined && nextVariants && nextVariants.length > 0
+            ? nextVariants.reduce((sum, cv) => sum + cv.stock, 0)
+            : updates.stockQuantity !== undefined
+            ? Math.max(0, Math.floor(Number(updates.stockQuantity) || 0))
+            : p.stockQuantity;
+
+        const nextArticleNo =
+          updates.articleNumber !== undefined
+            ? updates.articleNumber.trim()
+            : p.articleNumber;
+
+        const updated: Product = {
+          ...p,
+          ...updates,
+          articleNumber: nextArticleNo,
+          colorVariants: nextVariants,
+          stockQuantity: nextStockQuantity,
+          options:
+            nextVariants && nextVariants.length > 0
+              ? { ...(updates.options || p.options), colors: nextVariants.map((cv) => cv.color) }
+              : updates.options || p.options,
+          verticalAttributes: {
+            ...(p.verticalAttributes || {}),
+            ...(updates.verticalAttributes || {}),
+            ...(nextArticleNo ? { articleNumber: nextArticleNo } : {}),
+          },
+          lastUpdated: todayIso,
+        };
         void syncProductToCloud(activeBusinessId, updated, 'upsert').catch(() => {});
         return updated;
       })
     );
     logActivity('inventory', 'Updated Product', `Updated item ${updates.name || id}`);
+  };
+
+  // Admin helper: Add new stock to an existing color OR add a new color to an article
+  const restockProductColor = (
+    productId: string,
+    colorName: string,
+    addQty: number,
+    hex?: string,
+    note?: string
+  ): { ok: boolean; error?: string } => {
+    const qty = Math.floor(Number(addQty) || 0);
+    const cleanColor = colorName.trim();
+    if (!cleanColor) return { ok: false, error: 'Color name is required.' };
+    if (qty <= 0) return { ok: false, error: 'Restock quantity must be at least 1.' };
+
+    const target = products.find((p) => p.id === productId);
+    if (!target) return { ok: false, error: 'Article not found.' };
+
+    const nowIso = new Date().toISOString();
+    const todayIso = nowIso.split('T')[0];
+    const currentVariants = target.colorVariants ? [...target.colorVariants] : [];
+    const existingIdx = currentVariants.findIndex(
+      (cv) => cv.color.trim().toLowerCase() === cleanColor.toLowerCase()
+    );
+
+    let prevStock = 0;
+    let newStock = qty;
+    let usedHex = hex || '#64748B';
+
+    if (existingIdx >= 0) {
+      prevStock = Math.max(0, Number(currentVariants[existingIdx].stock) || 0);
+      newStock = prevStock + qty;
+      usedHex = currentVariants[existingIdx].hex || usedHex;
+      currentVariants[existingIdx] = {
+        ...currentVariants[existingIdx],
+        stock: newStock,
+        inStock: true,
+      };
+    } else {
+      if (currentVariants.length >= 20) {
+        return { ok: false, error: 'Maximum of 20 colors per article reached.' };
+      }
+      currentVariants.push({
+        color: cleanColor,
+        hex: usedHex,
+        stock: qty,
+        inStock: true,
+      });
+    }
+
+    const totalStock = currentVariants.reduce((sum, cv) => sum + Math.max(0, cv.stock), 0);
+    const updatedProd: Product = {
+      ...target,
+      colorVariants: currentVariants,
+      stockQuantity: totalStock,
+      color: currentVariants.find((cv) => cv.stock > 0)?.color || target.color,
+      options: {
+        ...target.options,
+        colors: currentVariants.map((cv) => cv.color),
+      },
+      lastUpdated: todayIso,
+    };
+
+    setProducts((prev) => prev.map((p) => (p.id === productId ? updatedProd : p)));
+    void syncProductToCloud(activeBusinessId, updatedProd, 'upsert').catch(() => {});
+
+    const articleNumber = getProductArticleLabel(target);
+    appendColorStockHistory([
+      {
+        id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: nowIso,
+        productId,
+        articleNumber,
+        productName: target.name,
+        color: existingIdx >= 0 ? currentVariants[existingIdx].color : cleanColor,
+        hex: usedHex,
+        type: 'restock',
+        quantityDelta: qty,
+        previousStock: prevStock,
+        newStock,
+        note: note || (existingIdx >= 0 ? 'Admin color restock' : 'Admin added new color stock'),
+      },
+    ]);
+    logActivity(
+      'inventory',
+      'Restocked Color',
+      `${articleNumber} • ${cleanColor} +${qty} (now ${newStock})`
+    );
+    return { ok: true };
+  };
+
+  // Cancel a completed sale and restore exact color-wise stock back to inventory
+  const cancelSale = (saleId: string, reason?: string): { ok: boolean; error?: string } => {
+    const targetSale = sales.find((s) => s.id === saleId);
+    if (!targetSale) return { ok: false, error: 'Sale record not found.' };
+    if (targetSale.status === 'cancelled') {
+      return { ok: false, error: 'This sale is already cancelled.' };
+    }
+
+    const nowIso = new Date().toISOString();
+    const todayIso = nowIso.split('T')[0];
+    const restoreColorMap = new Map<string, Map<string, number>>();
+    const restoreTotalMap = new Map<string, number>();
+
+    for (const item of targetSale.items) {
+      restoreTotalMap.set(item.productId, (restoreTotalMap.get(item.productId) || 0) + item.quantity);
+      const cKey = (item.color || '').trim().toLowerCase();
+      if (cKey) {
+        if (!restoreColorMap.has(item.productId)) {
+          restoreColorMap.set(item.productId, new Map());
+        }
+        const m = restoreColorMap.get(item.productId)!;
+        m.set(cKey, (m.get(cKey) || 0) + item.quantity);
+      }
+    }
+
+    const historyEntries: ColorStockHistoryEntry[] = [];
+    const updatedProducts: Product[] = [];
+
+    setProducts((prev) =>
+      prev.map((prod) => {
+        const restoreQty = restoreTotalMap.get(prod.id) || 0;
+        if (restoreQty <= 0) return prod;
+        const articleNo = getProductArticleLabel(prod);
+        const cmap = restoreColorMap.get(prod.id);
+
+        if (prod.colorVariants && prod.colorVariants.length > 0 && cmap && cmap.size > 0) {
+          const nextVariants = prod.colorVariants.map((cv) => {
+            const addBack = cmap.get(cv.color.trim().toLowerCase()) || 0;
+            if (addBack <= 0) return cv;
+            const prevStock = Math.max(0, Number(cv.stock) || 0);
+            const nextStock = prevStock + addBack;
+            historyEntries.push({
+              id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              timestamp: nowIso,
+              productId: prod.id,
+              articleNumber: articleNo,
+              productName: prod.name,
+              color: cv.color,
+              hex: cv.hex,
+              type: 'cancel_sale',
+              quantityDelta: addBack,
+              previousStock: prevStock,
+              newStock: nextStock,
+              referenceNo: targetSale.invoiceNo,
+              note: reason || `Cancelled sale ${targetSale.invoiceNo}`,
+            });
+            return { ...cv, stock: nextStock, inStock: true };
+          });
+          const nextTotal = nextVariants.reduce((sum, cv) => sum + Math.max(0, cv.stock), 0);
+          const updated: Product = {
+            ...prod,
+            colorVariants: nextVariants,
+            stockQuantity: nextTotal,
+            lastUpdated: todayIso,
+          };
+          updatedProducts.push(updated);
+          return updated;
+        }
+
+        const prevStock = Math.max(0, Number(prod.stockQuantity) || 0);
+        const nextStock = prevStock + restoreQty;
+        historyEntries.push({
+          id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: nowIso,
+          productId: prod.id,
+          articleNumber: articleNo,
+          productName: prod.name,
+          color: prod.color || 'Default',
+          type: 'cancel_sale',
+          quantityDelta: restoreQty,
+          previousStock: prevStock,
+          newStock: nextStock,
+          referenceNo: targetSale.invoiceNo,
+          note: reason || `Cancelled sale ${targetSale.invoiceNo}`,
+        });
+        const updated: Product = {
+          ...prod,
+          stockQuantity: nextStock,
+          lastUpdated: todayIso,
+        };
+        updatedProducts.push(updated);
+        return updated;
+      })
+    );
+
+    setSales((prev) =>
+      prev.map((s) =>
+        s.id === saleId
+          ? {
+              ...s,
+              status: 'cancelled',
+              cancelledAt: nowIso,
+              cancelReason: reason || 'Cancelled by Admin',
+            }
+          : s
+      )
+    );
+
+    appendColorStockHistory(historyEntries);
+    updatedProducts.forEach((p) => {
+      void syncProductToCloud(activeBusinessId, p, 'upsert').catch(() => {});
+    });
+    logActivity(
+      'sale',
+      `Cancelled Sale ${targetSale.invoiceNo}`,
+      `Restored color-wise stock for ${targetSale.items.length} line(s)`
+    );
+    return { ok: true };
   };
 
   const deleteProduct = (id: string) => {
@@ -3728,18 +4432,104 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: data.notes,
     };
 
-    // If restocked is true, add stock back to products
+    // If restocked is true, restore exact color-wise stock back to products and sync to cloud
+    const nowIso = new Date().toISOString();
+    const todayIso = nowIso.split('T')[0];
+    const restoreColorMap = new Map<string, Map<string, number>>();
+    const restoreTotalMap = new Map<string, number>();
+
     data.items.forEach((item) => {
-      if (item.restocked) {
-        setProducts((prev) =>
-          prev.map((p) =>
-            p.id === item.productId
-              ? { ...p, stockQuantity: p.stockQuantity + item.quantityReturned }
-              : p
-          )
-        );
+      if (!item.restocked) return;
+      restoreTotalMap.set(
+        item.productId,
+        (restoreTotalMap.get(item.productId) || 0) + item.quantityReturned
+      );
+      const cKey = (item.color || '').trim().toLowerCase();
+      if (cKey) {
+        if (!restoreColorMap.has(item.productId)) {
+          restoreColorMap.set(item.productId, new Map());
+        }
+        const m = restoreColorMap.get(item.productId)!;
+        m.set(cKey, (m.get(cKey) || 0) + item.quantityReturned);
       }
     });
+
+    const historyEntries: ColorStockHistoryEntry[] = [];
+    const restoredProducts: Product[] = [];
+
+    if (restoreTotalMap.size > 0) {
+      setProducts((prev) =>
+        prev.map((p) => {
+          const restoreQty = restoreTotalMap.get(p.id) || 0;
+          if (restoreQty <= 0) return p;
+          const articleNo = getProductArticleLabel(p);
+          const cmap = restoreColorMap.get(p.id);
+
+          if (p.colorVariants && p.colorVariants.length > 0 && cmap && cmap.size > 0) {
+            const nextVariants = p.colorVariants.map((cv) => {
+              const addBack = cmap.get(cv.color.trim().toLowerCase()) || 0;
+              if (addBack <= 0) return cv;
+              const prevStock = Math.max(0, Number(cv.stock) || 0);
+              const nextStock = prevStock + addBack;
+              historyEntries.push({
+                id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                timestamp: nowIso,
+                productId: p.id,
+                articleNumber: articleNo,
+                productName: p.name,
+                color: cv.color,
+                hex: cv.hex,
+                type: 'return',
+                quantityDelta: addBack,
+                previousStock: prevStock,
+                newStock: nextStock,
+                referenceNo: returnId,
+                note: `Returned from ${data.originalInvoiceNo}`,
+              });
+              return { ...cv, stock: nextStock, inStock: true };
+            });
+            const nextTotal = nextVariants.reduce((sum, cv) => sum + Math.max(0, cv.stock), 0);
+            const updated: Product = {
+              ...p,
+              colorVariants: nextVariants,
+              stockQuantity: nextTotal,
+              lastUpdated: todayIso,
+            };
+            restoredProducts.push(updated);
+            return updated;
+          }
+
+          const prevStock = Math.max(0, Number(p.stockQuantity) || 0);
+          const nextStock = prevStock + restoreQty;
+          historyEntries.push({
+            id: `csh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: nowIso,
+            productId: p.id,
+            articleNumber: articleNo,
+            productName: p.name,
+            color: p.color || 'Default',
+            type: 'return',
+            quantityDelta: restoreQty,
+            previousStock: prevStock,
+            newStock: nextStock,
+            referenceNo: returnId,
+            note: `Returned from ${data.originalInvoiceNo}`,
+          });
+          const updated: Product = {
+            ...p,
+            stockQuantity: nextStock,
+            lastUpdated: todayIso,
+          };
+          restoredProducts.push(updated);
+          return updated;
+        })
+      );
+
+      appendColorStockHistory(historyEntries);
+      restoredProducts.forEach((p) => {
+        void syncProductToCloud(activeBusinessId, p, 'upsert').catch(() => {});
+      });
+    }
 
     // If refund method is udhar_credit and customer has khata, reduce their balance
     if (data.refundMethod === 'udhar_credit' && data.customerPhone) {
@@ -3956,11 +4746,18 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lowStockItems,
         cart,
         addToCart,
+        addMultipleColorsToCart,
         removeFromCart,
         removeCartItemAt,
         updateCartQuantity,
         updateCartItemAt,
         clearCart,
+        getLiveColorStock,
+        getRemainingColorStock,
+        validateCartStock,
+        restockProductColor,
+        cancelSale,
+        colorStockHistory,
         heldOrders,
         holdCurrentOrder,
         resumeHeldOrder,

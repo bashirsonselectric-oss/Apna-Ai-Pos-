@@ -3,6 +3,11 @@ import { usePos } from '../../context/PosContext';
 import { VERTICALS_CONFIG } from '../../data/defaultData';
 import { BusinessVertical } from '../../types';
 import {
+  safeJsonFetch,
+  loginLocalFallbackAccount,
+  registerLocalFallbackAccount,
+} from '../../lib/safeFetch';
+import {
   Store,
   ShieldCheck,
   User,
@@ -102,13 +107,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
   const fetchDbUsers = async () => {
     setDbLoading(true);
     try {
-      const res = await fetch('/api/auth/users-table');
-      const data = await res.json();
-      if (data.rows) {
-        setDbUsers(data.rows);
+      const res = await safeJsonFetch<{ rows?: UserTableRow[] }>('/api/auth/users-table');
+      if (res.ok && res.data?.rows) {
+        setDbUsers(res.data.rows);
       }
-    } catch (err) {
-      console.error('Failed to load database users table:', err);
     } finally {
       setDbLoading(false);
     }
@@ -130,17 +132,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
     setLoginSuccess(null);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await safeJsonFetch<{ user?: any; token?: string; error?: string }>('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Login verification failed');
+      let userObj: any = null;
+      let tokenStr = `local_${Date.now()}`;
+      if (res.isStaticFallback) {
+        const localLogin = await loginLocalFallbackAccount(loginEmail, loginPassword);
+        if (!localLogin.success || !localLogin.user) {
+          throw new Error(localLogin.error || 'Account not found. Register a new account or sign in with Google.');
+        }
+        userObj = localLogin.user;
+      } else if (!res.ok || !res.data?.user) {
+        throw new Error(res.data?.error || res.error || 'Login verification failed');
+      } else {
+        userObj = res.data.user;
+        tokenStr = res.data.token || tokenStr;
       }
 
+      const data = { user: userObj, token: tokenStr };
       setLoginSuccess(`Verified! Welcome back, ${data.user.name}.`);
       localStorage.setItem('apna_pos_onboarded', 'true');
       localStorage.setItem('apna_pos_auth_token', data.token);
@@ -214,7 +227,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
     }
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await safeJsonFetch<{ user?: any; token?: string; error?: string }>('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -226,12 +239,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Registration failed in database');
+      let userObj: any = null;
+      let tokenStr = `local_${Date.now()}`;
+      if (res.isStaticFallback) {
+        const localReg = await registerLocalFallbackAccount({
+          name: signupName,
+          email: signupEmail,
+          password: signupPassword,
+          role: 'admin',
+          storeName: signupStoreName,
+        });
+        if (!localReg.success || !localReg.user) {
+          throw new Error(localReg.error || 'Registration failed');
+        }
+        userObj = localReg.user;
+      } else if (!res.ok || !res.data?.user) {
+        throw new Error(res.data?.error || res.error || 'Registration failed in database');
+      } else {
+        userObj = res.data.user;
+        tokenStr = res.data.token || tokenStr;
       }
 
-      setSignupSuccess(`Account registered in database! Row ID #${data.user.id} created.`);
+      const data = { user: userObj, token: tokenStr };
+      setSignupSuccess(`Account registered! Store profile ready for ${data.user.name}.`);
       localStorage.setItem('apna_pos_onboarded', 'true');
       localStorage.setItem('apna_pos_auth_token', data.token);
 
@@ -277,15 +307,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, initialMo
   const handleRunHashDemo = async (pwd: string) => {
     setHashCalculating(true);
     try {
-      const res = await fetch('/api/auth/verify-hash', {
+      const res = await safeJsonFetch('/api/auth/verify-hash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd }),
       });
-      const data = await res.json();
-      setHashResult(data);
-    } catch (err) {
-      console.error('Hash calc failed:', err);
+      if (res.ok && res.data) {
+        setHashResult(res.data);
+      }
     } finally {
       setHashCalculating(false);
     }

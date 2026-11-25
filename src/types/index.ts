@@ -34,6 +34,7 @@ export interface VerticalConfig {
 
 export interface Product {
   id: string;
+  articleNumber?: string; // e.g. "Article 1"
   name: string;
   urduName?: string;
   barcode: string;
@@ -137,6 +138,7 @@ export interface SaleRecord {
   customerPhone?: string;
   items: {
     productId: string;
+    articleNumber?: string;
     name: string;
     quantity: number;
     unit: string;
@@ -169,6 +171,25 @@ export interface SaleRecord {
   isOfflineSale?: boolean;
   isOfflineSyncPending?: boolean;
   syncedAt?: string;
+  status?: 'completed' | 'cancelled';
+  cancelledAt?: string;
+  cancelReason?: string;
+}
+
+export interface ColorStockHistoryEntry {
+  id: string;
+  timestamp: string;
+  productId: string;
+  articleNumber: string;
+  productName: string;
+  color: string;
+  hex?: string;
+  type: 'sale' | 'restock' | 'return' | 'cancel_sale' | 'initial_entry' | 'adjustment';
+  quantityDelta: number;
+  previousStock: number;
+  newStock: number;
+  referenceNo?: string;
+  note?: string;
 }
 
 export interface EstimateItem {
@@ -612,7 +633,9 @@ export interface SupplierBackupRecord {
 // Returns & Refunds System
 export interface ReturnItem {
   productId: string;
+  articleNumber?: string;
   name: string;
+  color?: string;
   quantityReturned: number;
   unitPrice: number;
   refundSubtotal: number;

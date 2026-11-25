@@ -22,6 +22,7 @@ import {
   sanitizeFirestoreId,
 } from './offlineDb';
 import { flushOfflineSyncQueue } from './firestoreSync';
+import { safeJsonFetch } from './safeFetch';
 import type { SaleRecord } from '../types';
 
 export type BackgroundSyncState = 'idle' | 'syncing' | 'offline' | 'error';
@@ -655,7 +656,12 @@ class BackgroundSyncService {
           await this.refreshSnapshot('syncing');
 
           try {
-            const response = await fetch('/api/pos/sync-offline-sales', {
+            const res = await safeJsonFetch<{
+              success: boolean;
+              syncedIds?: string[];
+              serverTimestamp?: string;
+              error?: string;
+            }>('/api/pos/sync-offline-sales', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -664,15 +670,23 @@ class BackgroundSyncService {
               }),
             });
 
-            if (!response.ok) {
-              throw new Error(`Online sync returned HTTP ${response.status}`);
+            if (res.isStaticFallback) {
+              // Static Vercel hosting without Express /api server: keep sales safely pending for Cloud Firestore sync once signed in with Google
+              for (const rec of batch) {
+                await offlineDb.updateOfflineSale(rec.id, {
+                  status: 'pending',
+                  lastError: 'Sign in with Google to sync offline sales to Cloud Firestore.',
+                });
+              }
+              this.lastError = 'Sign in with Google to sync offline sales to Cloud Firestore.';
+              return { syncedSales, syncedOther, failed, syncedSaleIds, skippedReason: 'unauthenticated' };
             }
 
-            const data = await response.json();
-            if (!data?.success) {
-              throw new Error(data?.error || 'Server rejected offline sale sync');
+            if (!res.ok || !res.data?.success) {
+              throw new Error(res.error || res.data?.error || `Online sync returned HTTP ${res.status}`);
             }
 
+            const data = res.data;
             const serverTimestamp = data.serverTimestamp || new Date().toISOString();
             const confirmedSet = new Set<string>(Array.isArray(data.syncedIds) ? data.syncedIds : []);
 
